@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
+const { executeStageActions } = require('../services/stage-actions');
 
 router.use(requireAuth);
 
@@ -122,6 +123,9 @@ router.patch('/:id', (req, res) => {
       `Stage changed from ${existing.stage} to ${req.body.stage}`,
       req.user.id
     );
+
+    // Execute stage actions
+    const actionResult = executeStageActions(req.db, parseInt(req.params.id), req.body.stage, req.user.id);
   }
 
   const deal = req.db.prepare('SELECT * FROM deals WHERE id = ?').get(req.params.id);
