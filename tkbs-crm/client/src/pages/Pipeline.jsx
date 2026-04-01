@@ -16,8 +16,16 @@ const STAGES = [
 export default function Pipeline() {
   const [deals, setDeals] = useState([]);
   const [showNewDeal, setShowNewDeal] = useState(false);
-  const [newDeal, setNewDeal] = useState({ company_name: '', contact_name: '', source: 'referral', estimated_value: '' });
+  const [newDeal, setNewDeal] = useState({
+    company_id: '',
+    company_name: '',
+    contact_id: '',
+    contact_name: '',
+    source: 'referral',
+    estimated_value: '',
+  });
   const [companies, setCompanies] = useState([]);
+  const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadDeals = async () => {
@@ -32,6 +40,13 @@ export default function Pipeline() {
   };
 
   useEffect(() => { loadDeals(); }, []);
+
+  useEffect(() => {
+    if (showNewDeal) {
+      api.getCompanies().then((d) => setCompanies(d.companies || [])).catch(() => {});
+      api.getContacts().then((d) => setContacts(d.contacts || [])).catch(() => {});
+    }
+  }, [showNewDeal]);
 
   const dealsByStage = (stageId) => deals.filter((d) => d.stage === stageId);
 
@@ -55,15 +70,15 @@ export default function Pipeline() {
   const handleCreateDeal = async (e) => {
     e.preventDefault();
     try {
-      // Create company if needed
-      let companyId = null;
-      if (newDeal.company_name) {
+      // Resolve company: use existing or create new
+      let companyId = newDeal.company_id ? parseInt(newDeal.company_id) : null;
+      if (!companyId && newDeal.company_name) {
         const compData = await api.createCompany({ name: newDeal.company_name });
         companyId = compData.company.id;
       }
-      // Create contact if needed
-      let contactId = null;
-      if (newDeal.contact_name) {
+      // Resolve contact: use existing or create new
+      let contactId = newDeal.contact_id ? parseInt(newDeal.contact_id) : null;
+      if (!contactId && newDeal.contact_name) {
         const ctData = await api.createContact({ name: newDeal.contact_name, company_id: companyId });
         contactId = ctData.contact.id;
       }
@@ -75,7 +90,7 @@ export default function Pipeline() {
         estimated_value: parseFloat(newDeal.estimated_value) || 0,
       });
       setShowNewDeal(false);
-      setNewDeal({ company_name: '', contact_name: '', source: 'referral', estimated_value: '' });
+      setNewDeal({ company_id: '', company_name: '', contact_id: '', contact_name: '', source: 'referral', estimated_value: '' });
       loadDeals();
     } catch (err) {
       alert('Failed to create deal: ' + err.message);
@@ -141,18 +156,56 @@ export default function Pipeline() {
       <Modal open={showNewDeal} onClose={() => setShowNewDeal(false)} title="New Deal">
         <form onSubmit={handleCreateDeal}>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Company Name</label>
-            <input
-              value={newDeal.company_name} onChange={(e) => setNewDeal({ ...newDeal, company_name: e.target.value })}
-              required style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14 }}
-            />
+            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Company</label>
+            <select
+              value={newDeal.company_id}
+              onChange={(e) => setNewDeal({ ...newDeal, company_id: e.target.value, contact_id: '', contact_name: '' })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, background: '#fff' }}
+            >
+              <option value="">+ Add New Company</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {newDeal.company_id === '' && (
+              <input
+                placeholder="Company name"
+                value={newDeal.company_name}
+                onChange={(e) => setNewDeal({ ...newDeal, company_name: e.target.value })}
+                required
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid #00D4AA', borderRadius: 4, fontSize: 14, marginTop: 6, boxSizing: 'border-box' }}
+              />
+            )}
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Contact Name</label>
-            <input
-              value={newDeal.contact_name} onChange={(e) => setNewDeal({ ...newDeal, contact_name: e.target.value })}
-              style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14 }}
-            />
+            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Contact</label>
+            {(() => {
+              const filteredContacts = newDeal.company_id
+                ? contacts.filter((c) => c.company_id === parseInt(newDeal.company_id))
+                : contacts;
+              return (
+                <>
+                  <select
+                    value={newDeal.contact_id}
+                    onChange={(e) => setNewDeal({ ...newDeal, contact_id: e.target.value, contact_name: '' })}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, background: '#fff' }}
+                  >
+                    <option value="">+ Add New Contact</option>
+                    {filteredContacts.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  {newDeal.contact_id === '' && (
+                    <input
+                      placeholder="Contact name (optional)"
+                      value={newDeal.contact_name}
+                      onChange={(e) => setNewDeal({ ...newDeal, contact_name: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #00D4AA', borderRadius: 4, fontSize: 14, marginTop: 6, boxSizing: 'border-box' }}
+                    />
+                  )}
+                </>
+              );
+            })()}
           </div>
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
