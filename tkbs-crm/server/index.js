@@ -38,6 +38,9 @@ function createApp(testDb) {
   app.use('/api/contacts', require('./routes/contacts'));
   app.use('/api/deals', require('./routes/deals'));
   app.use('/api/activities', require('./routes/activities'));
+  app.use('/api/tasks', require('./routes/tasks'));
+  app.use('/api/scripts', require('./routes/scripts'));
+  app.use('/api/settings', require('./routes/settings'));
 
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {
@@ -46,6 +49,12 @@ function createApp(testDb) {
       res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'));
     });
   }
+
+  // Error handler
+  app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  });
 
   return app;
 }
