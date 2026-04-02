@@ -41,6 +41,11 @@ if (actionCount === 0) {
   console.log('Seed data already exists.');
 }
 
+// Seed script templates
+const { seedScriptTemplates } = require('./server/db/seed-scripts');
+const scriptResult = seedScriptTemplates(db);
+console.log(scriptResult.seeded ? 'Script templates seeded: ' + scriptResult.count : 'Script templates already exist.');
+
 db.close();
 "
 
