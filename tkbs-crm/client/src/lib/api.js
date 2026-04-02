@@ -47,4 +47,10 @@ export const api = {
   // Activities
   getActivities: (params) => request(`/activities${params ? '?' + new URLSearchParams(params) : ''}`),
   createActivity: (body) => request('/activities', { method: 'POST', body }),
+
+  // Tasks
+  getTasks: (params) => request(`/tasks${params ? '?' + new URLSearchParams(params) : ''}`),
+  createTask: (body) => request('/tasks', { method: 'POST', body }),
+  updateTask: (id, body) => request(`/tasks/${id}`, { method: 'PATCH', body }),
+  deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
 };
