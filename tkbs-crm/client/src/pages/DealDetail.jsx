@@ -34,6 +34,11 @@ export default function DealDetail() {
 
   useEffect(() => { loadDeal(); }, [id]);
 
+  const deleteTask = async (taskId) => {
+    await api.deleteTask(taskId);
+    loadDeal();
+  };
+
   const addNote = async (e) => {
     e.preventDefault();
     if (!newNote.trim()) return;
@@ -147,6 +152,66 @@ export default function DealDetail() {
               }}
             />
           </div>
+          {/* Upcoming Tasks card */}
+          {(() => {
+            const now = new Date();
+            const pendingTasks = tasks
+              .filter(t => t.status === 'pending')
+              .sort((a, b) => {
+                if (!a.due_at && !b.due_at) return 0;
+                if (!a.due_at) return 1;
+                if (!b.due_at) return -1;
+                return new Date(a.due_at) - new Date(b.due_at);
+              })
+              .slice(0, 5);
+            const taskColor = (t) => {
+              if (!t.due_at) return '#64748B';
+              const d = new Date(t.due_at);
+              const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+              if (d < todayStart) return '#dc2626';
+              if (d < tomorrowStart) return '#1B2838';
+              return '#64748B';
+            };
+            return (
+              <div style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1B2838', margin: 0 }}>Upcoming Tasks</h3>
+                  <span style={{
+                    background: '#E2E6EB', color: '#64748B', fontSize: 11, fontWeight: 700,
+                    borderRadius: 10, padding: '1px 7px',
+                  }}>
+                    {tasks.filter(t => t.status === 'pending').length}
+                  </span>
+                </div>
+                {pendingTasks.length === 0 ? (
+                  <div style={{ fontSize: 13, color: '#64748B' }}>No pending tasks.</div>
+                ) : (
+                  pendingTasks.map(t => (
+                    <div key={t.id} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '6px 0', borderBottom: '1px solid #F7F8FA',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          onChange={async () => { await api.updateTask(t.id, { status: 'done' }); loadDeal(); }}
+                          style={{ cursor: 'pointer', width: 15, height: 15 }}
+                        />
+                        <span style={{ fontSize: 13, color: taskColor(t) }}>{t.description}</span>
+                      </div>
+                      {t.due_at && (
+                        <span style={{ fontSize: 11, color: taskColor(t), whiteSpace: 'nowrap', marginLeft: 8 }}>
+                          {new Date(t.due_at).toLocaleDateString()} {new Date(t.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -210,11 +275,23 @@ export default function DealDetail() {
                   {t.description}
                 </span>
               </div>
-              {t.due_at && (
-                <span style={{ fontSize: 11, color: '#64748B' }}>
-                  {new Date(t.due_at).toLocaleDateString()}
-                </span>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {t.due_at && (
+                  <span style={{ fontSize: 11, color: '#64748B' }}>
+                    {new Date(t.due_at).toLocaleDateString()}
+                  </span>
+                )}
+                <button
+                  onClick={() => deleteTask(t.id)}
+                  title="Delete task"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: '#64748B', fontSize: 15, lineHeight: 1, padding: '0 2px',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             </div>
           ))}
           <div style={{ marginTop: 16 }}>

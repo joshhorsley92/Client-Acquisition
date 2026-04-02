@@ -28,7 +28,7 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { deal_id, description, due_at, due_at_natural, auto_generated, template_key } = req.body;
+  const { deal_id, description, due_at, due_at_natural, auto_generated, template_key, notes } = req.body;
   if (!deal_id) return res.status(400).json({ error: 'deal_id is required' });
   if (!description) return res.status(400).json({ error: 'description is required' });
 
@@ -39,9 +39,9 @@ router.post('/', (req, res) => {
   }
 
   const result = req.db.prepare(
-    `INSERT INTO tasks (deal_id, description, due_at, auto_generated, template_key)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(deal_id, description, resolvedDueAt, auto_generated ? 1 : 0, template_key || null);
+    `INSERT INTO tasks (deal_id, description, due_at, auto_generated, template_key, notes)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(deal_id, description, resolvedDueAt, auto_generated ? 1 : 0, template_key || null, notes || null);
 
   const task = req.db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json({ task });
@@ -56,6 +56,7 @@ router.patch('/:id', (req, res) => {
 
   if (req.body.description !== undefined) { updates.push('description = ?'); values.push(req.body.description); }
   if (req.body.due_at !== undefined) { updates.push('due_at = ?'); values.push(req.body.due_at); }
+  if (req.body.notes !== undefined) { updates.push('notes = ?'); values.push(req.body.notes); }
   if (req.body.status !== undefined) {
     updates.push('status = ?');
     values.push(req.body.status);

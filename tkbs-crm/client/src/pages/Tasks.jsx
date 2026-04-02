@@ -25,6 +25,11 @@ export default function Tasks() {
     load();
   };
 
+  const deleteTask = async (id) => {
+    await api.deleteTask(id);
+    load();
+  };
+
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -71,6 +76,16 @@ export default function Tasks() {
                 style={{ background: 'none', border: 'none', color: '#00D4AA', fontSize: 11, cursor: 'pointer' }}
               >
                 View Deal →
+              </button>
+              <button
+                onClick={() => deleteTask(t.id)}
+                title="Delete task"
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: '#64748B', fontSize: 16, lineHeight: 1, padding: '0 2px',
+                }}
+              >
+                ×
               </button>
             </div>
           </div>

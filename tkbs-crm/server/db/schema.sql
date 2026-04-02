@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'done', 'overdue')),
   auto_generated INTEGER NOT NULL DEFAULT 0,
   template_key TEXT,
+  notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT
 );

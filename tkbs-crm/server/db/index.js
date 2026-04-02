@@ -22,6 +22,9 @@ function initDb() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
   database.exec(schema);
 
+  // Migrations - add columns if they don't exist
+  try { database.exec('ALTER TABLE tasks ADD COLUMN notes TEXT'); } catch(e) { /* already exists */ }
+
   return database;
 }
 
