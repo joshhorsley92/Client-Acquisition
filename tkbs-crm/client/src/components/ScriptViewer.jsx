@@ -9,6 +9,9 @@ export default function ScriptViewer({ deal, contact, company }) {
   const [scripts, setScripts] = useState([]);
   const [activeScript, setActiveScript] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
+  const [generating, setGenerating] = useState(false);
+  const [aiContent, setAiContent] = useState(null);
+  const [generationError, setGenerationError] = useState(null);
 
   useEffect(() => {
     if (deal?.stage) {
@@ -59,6 +62,40 @@ export default function ScriptViewer({ deal, contact, company }) {
     return steps;
   };
 
+  const getPromptTypesForStage = (stage) => {
+    switch (stage) {
+      case 'outreach': return 'outreach_emails';
+      case 'discovery_call': return 'outreach_call';
+      case 'follow_up': return 'followup_emails';
+      default: return 'generic';
+    }
+  };
+
+  const generateWithAI = async (promptType) => {
+    setGenerating(true);
+    setGenerationError(null);
+    try {
+      await api.request(`/deals/${deal.id}/generate`, { method: 'POST', body: { prompt_type: promptType } });
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const status = await api.request(`/deals/${deal.id}/generation-status`);
+        const latest = status.jobs[0];
+        if (latest && latest.status !== 'running') {
+          clearInterval(poll);
+          setGenerating(false);
+          if (latest.status === 'completed') {
+            setAiContent(latest.output);
+          } else {
+            setGenerationError(latest.error || 'Generation failed');
+          }
+        }
+      }, 5000);
+    } catch (err) {
+      setGenerating(false);
+      setGenerationError(err.message);
+    }
+  };
+
   if (scripts.length === 0) {
     return <div style={{ fontSize: 13, color: '#64748B' }}>No scripts available for this stage.</div>;
   }
@@ -86,6 +123,48 @@ export default function ScriptViewer({ deal, contact, company }) {
           </button>
         ))}
       </div>
+
+      {/* Generate with AI */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button
+          onClick={() => generateWithAI(getPromptTypesForStage(deal.stage))}
+          disabled={generating}
+          style={{
+            padding: '6px 14px', fontSize: 12, borderRadius: 4,
+            background: generating ? '#F7F8FA' : '#1B2838', color: generating ? '#64748B' : '#00D4AA',
+            border: 'none', cursor: generating ? 'not-allowed' : 'pointer', fontWeight: 600,
+          }}
+        >
+          {generating ? 'Generating...' : '✨ Generate with AI'}
+        </button>
+      </div>
+
+      {generationError && (
+        <div style={{ background: '#FFF3E0', color: '#E6A817', padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
+          {generationError}
+        </div>
+      )}
+
+      {aiContent && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#00D4AA', marginBottom: 4 }}>AI Generated Content</div>
+          <div style={{
+            background: '#fff', border: '2px solid #00D4AA', borderRadius: 8, padding: 16,
+            whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6,
+          }}>
+            {aiContent}
+          </div>
+          <button
+            onClick={() => navigator.clipboard.writeText(aiContent)}
+            style={{
+              marginTop: 8, padding: '6px 16px', fontSize: 12, background: '#00D4AA',
+              color: '#1B2838', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600,
+            }}
+          >
+            Copy AI Content
+          </button>
+        </div>
+      )}
 
       {/* Stepper mode for call scripts */}
       {isCallScript && steps.length > 0 ? (
