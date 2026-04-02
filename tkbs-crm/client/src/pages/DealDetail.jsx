@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import ScriptViewer from '../components/ScriptViewer';
+import FollowUpScheduler from '../components/FollowUpScheduler';
 
 export default function DealDetail() {
   const { id } = useParams();
@@ -216,6 +217,9 @@ export default function DealDetail() {
               )}
             </div>
           ))}
+          <div style={{ marginTop: 16 }}>
+            <FollowUpScheduler dealId={parseInt(id)} onCreated={loadDeal} />
+          </div>
         </div>
       )}
 
