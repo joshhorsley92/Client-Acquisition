@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import ScriptViewer from '../components/ScriptViewer';
 
 export default function DealDetail() {
   const { id } = useParams();
@@ -48,7 +49,7 @@ export default function DealDetail() {
   if (loading) return <div style={{ padding: 40 }}>Loading deal...</div>;
   if (!deal) return <div style={{ padding: 40 }}>Deal not found.</div>;
 
-  const tabs = ['overview', 'activity', 'tasks'];
+  const tabs = ['overview', 'activity', 'tasks', 'scripts'];
   const tabStyle = (t) => ({
     padding: '8px 16px', fontSize: 13, fontWeight: activeTab === t ? 600 : 400,
     color: activeTab === t ? '#00D4AA' : '#64748B', background: 'none', border: 'none',
@@ -216,6 +217,11 @@ export default function DealDetail() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Scripts Tab */}
+      {activeTab === 'scripts' && (
+        <ScriptViewer deal={deal} contact={contact} company={company} />
       )}
     </div>
   );

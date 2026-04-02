@@ -53,4 +53,10 @@ export const api = {
   createTask: (body) => request('/tasks', { method: 'POST', body }),
   updateTask: (id, body) => request(`/tasks/${id}`, { method: 'PATCH', body }),
   deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
+
+  // Scripts
+  getScripts: (params) => request(`/scripts${params ? '?' + new URLSearchParams(params) : ''}`),
+  createScript: (body) => request('/scripts', { method: 'POST', body }),
+  updateScript: (id, body) => request(`/scripts/${id}`, { method: 'PATCH', body }),
+  deleteScript: (id) => request(`/scripts/${id}`, { method: 'DELETE' }),
 };
