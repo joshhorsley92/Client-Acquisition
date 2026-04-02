@@ -7,6 +7,8 @@ import Pipeline from './pages/Pipeline';
 import DealDetail from './pages/DealDetail';
 import Contacts from './pages/Contacts';
 import Companies from './pages/Companies';
+import Tasks from './pages/Tasks';
+import Scripts from './pages/Scripts';
 
 export const AuthContext = createContext(null);
 
@@ -52,6 +54,8 @@ export default function App() {
             <Route path="deals/:id" element={<DealDetail />} />
             <Route path="contacts" element={<Contacts />} />
             <Route path="companies" element={<Companies />} />
+            <Route path="tasks" element={<Tasks />} />
+            <Route path="scripts" element={<Scripts />} />
           </Route>
         </Routes>
       </BrowserRouter>

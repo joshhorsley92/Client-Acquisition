@@ -4,8 +4,10 @@ import { useAuth } from '../App';
 
 const navItems = [
   { to: '/', label: 'Pipeline', icon: '◫' },
+  { to: '/tasks', label: 'Tasks', icon: '☑' },
   { to: '/contacts', label: 'Contacts', icon: '☻' },
   { to: '/companies', label: 'Companies', icon: '⌂' },
+  { to: '/scripts', label: 'Scripts', icon: '✎' },
 ];
 
 export default function Layout() {
