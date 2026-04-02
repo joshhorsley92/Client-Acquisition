@@ -8,6 +8,8 @@ const navItems = [
   { to: '/contacts', label: 'Contacts', icon: '☻' },
   { to: '/companies', label: 'Companies', icon: '⌂' },
   { to: '/scripts', label: 'Scripts', icon: '✎' },
+  { to: '/reports', label: 'Reports', icon: '▦' },
+  { to: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function Layout() {

@@ -9,6 +9,8 @@ import Contacts from './pages/Contacts';
 import Companies from './pages/Companies';
 import Tasks from './pages/Tasks';
 import Scripts from './pages/Scripts';
+import Reports from './pages/Reports';
+import Settings from './pages/Settings';
 
 export const AuthContext = createContext(null);
 
@@ -56,6 +58,8 @@ export default function App() {
             <Route path="companies" element={<Companies />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="scripts" element={<Scripts />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

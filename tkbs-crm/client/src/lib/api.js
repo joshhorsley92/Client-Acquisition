@@ -59,4 +59,14 @@ export const api = {
   createScript: (body) => request('/scripts', { method: 'POST', body }),
   updateScript: (id, body) => request(`/scripts/${id}`, { method: 'PATCH', body }),
   deleteScript: (id) => request(`/scripts/${id}`, { method: 'DELETE' }),
+
+  // Reports
+  getReportSummary: () => request('/reports/summary'),
+  getReportFunnel: () => request('/reports/funnel'),
+  getReportSources: () => request('/reports/sources'),
+  getReportLostReasons: () => request('/reports/lost-reasons'),
+  getReportMonthly: () => request('/reports/monthly'),
+
+  // Generic request helper for settings
+  request: (path, options = {}) => request(path, options),
 };
