@@ -23,11 +23,42 @@ function executeStageActions(db, dealId, newStage, userId) {
         result.actions.push({ type: 'start_cadence', reminders: config.reminders?.length || 0 });
         break;
 
-      case 'trigger_skill':
-        // Phase 3 will implement CLI invocation. For now, log intent.
+      case 'trigger_skill': {
+        const { isCliAvailable: cliAvailable, runTrackedJob } = require('./claude-cli');
+        const { buildPrompt } = require('./ai-prompts');
+
+        if (!cliAvailable()) {
+          result.actions.push({ type: 'trigger_skill', skill: config.skill, skipped: true, reason: 'CLI not installed' });
+          break;
+        }
+
+        const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId);
+        const company = deal?.company_id ? db.prepare('SELECT * FROM companies WHERE id = ?').get(deal.company_id) : {};
+        const contact = deal?.contact_id ? db.prepare('SELECT * FROM contacts WHERE id = ?').get(deal.contact_id) : {};
+
+        // Build prompt from config template with deal context
+        let prompt = config.prompt_template || '';
+        const context = {
+          company: company?.name || '', contact: contact?.name || '',
+          location: company?.location || '', industry: company?.industry || '',
+          type: company?.type || '', source_detail: deal?.source_detail || '',
+          notes: deal?.call_notes || '', package_type: deal?.package_type || '',
+          services_discussed: deal?.services_discussed || '', pricing_notes: deal?.pricing_notes || '',
+          call_notes: deal?.call_notes || '',
+        };
+        prompt = prompt.replace(/\{(\w+)\}/g, (match, field) => context[field] || match);
+
+        const jobType = config.skill === 'tkbs-initial-analysis' ? 'analysis_deck' : 'proposal';
+
+        // Run async — don't await in the action handler
+        runTrackedJob(db, dealId, jobType, prompt).catch(err => {
+          console.error(`Skill trigger failed for deal ${dealId}:`, err.message);
+        });
+
         result.skillsTriggered.push(config.skill);
-        result.actions.push({ type: 'trigger_skill', skill: config.skill });
+        result.actions.push({ type: 'trigger_skill', skill: config.skill, started: true });
         break;
+      }
 
       case 'record':
         handleRecord(db, dealId, config);
