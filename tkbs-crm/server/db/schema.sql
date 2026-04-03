@@ -122,3 +122,55 @@ CREATE TABLE IF NOT EXISTS generation_jobs (
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS integration_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL UNIQUE,
+  config TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS email_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  direction TEXT NOT NULL CHECK(direction IN ('outbound', 'inbound')),
+  gmail_message_id TEXT,
+  gmail_thread_id TEXT,
+  subject TEXT,
+  body_text TEXT,
+  body_html TEXT,
+  from_email TEXT,
+  to_email TEXT,
+  sent_at TEXT,
+  opened_at TEXT,
+  clicked_at TEXT,
+  tracking_pixel_id TEXT UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS outbound_webhooks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT '[]',
+  headers TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sms_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  direction TEXT NOT NULL CHECK(direction IN ('outbound', 'inbound')),
+  twilio_sid TEXT,
+  from_number TEXT,
+  to_number TEXT,
+  body TEXT,
+  status TEXT DEFAULT 'sent',
+  sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

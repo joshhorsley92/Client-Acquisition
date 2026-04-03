@@ -17,3 +17,10 @@ INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES
   ('follow_up', 'start_cadence', '{"reminders":[{"day":1,"template":"followup_thankyou"},{"day":4,"template":"followup_checkin"},{"day":10,"template":"followup_valueadd"},{"day":21,"template":"followup_breakup"}]}', 0),
   ('closed_won', 'create_tasks', '{"tasks":[{"description":"Send welcome email","due_offset_days":0},{"description":"Schedule kickoff meeting","due_offset_days":1},{"description":"Send onboarding checklist","due_offset_days":2}]}', 0),
   ('closed_lost', 'record', '{"require_lost_reason":true,"cancel_pending_tasks":true}', 0);
+
+-- Default integration settings (disabled until configured)
+INSERT OR IGNORE INTO integration_settings (type, config) VALUES ('gmail', '{}');
+INSERT OR IGNORE INTO integration_settings (type, config) VALUES ('slack', '{}');
+INSERT OR IGNORE INTO integration_settings (type, config) VALUES ('google_calendar', '{}');
+INSERT OR IGNORE INTO integration_settings (type, config) VALUES ('twilio', '{}');
+INSERT OR IGNORE INTO integration_settings (type, config) VALUES ('webhooks', '{}');
