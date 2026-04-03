@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
 
@@ -40,7 +41,7 @@ const INTEGRATION_META = {
   },
 };
 
-function IntegrationCard({ integration, onToggle, onSave }) {
+function IntegrationCard({ integration, onToggle, onSave, onDisconnectGoogle }) {
   const meta = INTEGRATION_META[integration.type];
   if (!meta) return null;
 
@@ -49,8 +50,10 @@ function IntegrationCard({ integration, onToggle, onSave }) {
     try { return JSON.parse(integration.config || '{}'); } catch { return {}; }
   });
   const [saving, setSaving] = useState(false);
+  const [connectingGoogle, setConnectingGoogle] = useState(false);
 
   const isConnected = integration.enabled === 1;
+  const googleEmail = config.email || null;
 
   const handleSave = async () => {
     setSaving(true);
@@ -58,6 +61,17 @@ function IntegrationCard({ integration, onToggle, onSave }) {
       await onSave(integration.type, config);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConnectGoogle = async () => {
+    setConnectingGoogle(true);
+    try {
+      const data = await api.request('/integrations/google/auth');
+      window.location.href = data.url;
+    } catch (err) {
+      alert('Failed to start Google OAuth: ' + err.message);
+      setConnectingGoogle(false);
     }
   };
 
@@ -78,21 +92,26 @@ function IntegrationCard({ integration, onToggle, onSave }) {
             }}>
               {isConnected ? 'Connected' : 'Not connected'}
             </span>
+            {isConnected && googleEmail && meta.oauthPlaceholder && (
+              <span style={{ fontSize: 12, color: '#64748B' }}>{googleEmail}</span>
+            )}
           </div>
           <p style={{ fontSize: 12, color: '#64748B', margin: '4px 0 0' }}>{meta.description}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 16 }}>
-          <button
-            onClick={() => onToggle(integration.type, integration.enabled)}
-            style={{
-              padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
-              background: isConnected ? '#00D4AA' : '#E2E6EB',
-              color: isConnected ? '#1B2838' : '#64748B',
-              border: 'none', fontWeight: 600,
-            }}
-          >
-            {isConnected ? 'Enabled' : 'Disabled'}
-          </button>
+          {!meta.oauthPlaceholder && (
+            <button
+              onClick={() => onToggle(integration.type, integration.enabled)}
+              style={{
+                padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+                background: isConnected ? '#00D4AA' : '#E2E6EB',
+                color: isConnected ? '#1B2838' : '#64748B',
+                border: 'none', fontWeight: 600,
+              }}
+            >
+              {isConnected ? 'Enabled' : 'Disabled'}
+            </button>
+          )}
           <button
             onClick={() => setExpanded(e => !e)}
             style={{
@@ -110,15 +129,43 @@ function IntegrationCard({ integration, onToggle, onSave }) {
           <div style={{ paddingTop: 14 }}>
             {meta.oauthPlaceholder && (
               <div>
-                <button style={{
-                  padding: '8px 16px', background: '#1B2838', color: '#fff',
-                  border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                }}>
-                  Connect Google Account
-                </button>
-                <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 8 }}>
-                  OAuth flow coming in Phase 4, Task 3.
-                </p>
+                {isConnected && googleEmail ? (
+                  <div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                      background: '#E6FAF5', border: '1px solid #00D4AA', borderRadius: 6, marginBottom: 12,
+                    }}>
+                      <span style={{ fontSize: 13, color: '#00D4AA', fontWeight: 600 }}>Connected as {googleEmail}</span>
+                    </div>
+                    <button
+                      onClick={onDisconnectGoogle}
+                      style={{
+                        padding: '8px 16px', background: '#FFF3E0', color: '#E6A817',
+                        border: '1px solid #E6A817', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      Disconnect Google Account
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <button
+                      onClick={handleConnectGoogle}
+                      disabled={connectingGoogle}
+                      style={{
+                        padding: '8px 16px', background: '#1B2838', color: '#fff',
+                        border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                        cursor: connectingGoogle ? 'not-allowed' : 'pointer',
+                        opacity: connectingGoogle ? 0.7 : 1,
+                      }}
+                    >
+                      {connectingGoogle ? 'Redirecting...' : 'Connect Google Account'}
+                    </button>
+                    <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 8 }}>
+                      Connects Gmail and Google Calendar with one OAuth flow.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -176,6 +223,7 @@ function IntegrationCard({ integration, onToggle, onSave }) {
 }
 
 export default function Settings() {
+  const location = useLocation();
   const [actions, setActions] = useState([]);
   const [users, setUsers] = useState([]);
   const [integrations, setIntegrations] = useState([]);
@@ -183,6 +231,7 @@ export default function Settings() {
   const [showNewUser, setShowNewUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'member' });
   const [activeTab, setActiveTab] = useState('actions');
+  const [oauthBanner, setOauthBanner] = useState(null);
 
   useEffect(() => {
     api.request('/settings/actions').then(d => setActions(d.actions)).catch(() => {});
@@ -190,6 +239,19 @@ export default function Settings() {
     api.request('/settings/cli-status').then(d => setCliStatus(d.available)).catch(() => setCliStatus(false));
     api.request('/integrations').then(d => setIntegrations(d.integrations)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('connected') === 'google') {
+      setOauthBanner({ type: 'success', message: 'Google account connected successfully!' });
+      setActiveTab('integrations');
+      // Refresh integrations
+      api.request('/integrations').then(d => setIntegrations(d.integrations)).catch(() => {});
+    } else if (params.get('error') === 'google_auth_failed') {
+      setOauthBanner({ type: 'error', message: 'Google OAuth failed. Please try again.' });
+      setActiveTab('integrations');
+    }
+  }, [location.search]);
 
   const toggleIntegration = async (type, currentEnabled) => {
     await api.request(`/integrations/${type}`, { method: 'PATCH', body: { enabled: !currentEnabled } });
@@ -199,6 +261,13 @@ export default function Settings() {
 
   const saveIntegrationConfig = async (type, config) => {
     await api.request(`/integrations/${type}`, { method: 'PATCH', body: { config } });
+    const d = await api.request('/integrations');
+    setIntegrations(d.integrations);
+  };
+
+  const disconnectGoogle = async () => {
+    if (!confirm('Disconnect your Google account? This will disable Gmail and Google Calendar.')) return;
+    await api.request('/integrations/google/disconnect', { method: 'POST' });
     const d = await api.request('/integrations');
     setIntegrations(d.integrations);
   };
@@ -283,6 +352,18 @@ export default function Settings() {
           <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>
             Connect external services to automate your sales workflow. All integrations are independently toggleable.
           </p>
+          {oauthBanner && (
+            <div style={{
+              padding: '10px 16px', borderRadius: 6, marginBottom: 16, fontSize: 13,
+              background: oauthBanner.type === 'success' ? '#E6FAF5' : '#FFF3E0',
+              color: oauthBanner.type === 'success' ? '#00D4AA' : '#E6A817',
+              border: `1px solid ${oauthBanner.type === 'success' ? '#00D4AA' : '#E6A817'}`,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span>{oauthBanner.message}</span>
+              <button onClick={() => setOauthBanner(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'inherit' }}>×</button>
+            </div>
+          )}
           {integrations.length === 0 && (
             <div style={{ color: '#94A3B8', fontSize: 13, textAlign: 'center', padding: 40 }}>
               Loading integrations...
@@ -294,6 +375,7 @@ export default function Settings() {
               integration={integration}
               onToggle={toggleIntegration}
               onSave={saveIntegrationConfig}
+              onDisconnectGoogle={disconnectGoogle}
             />
           ))}
         </div>
