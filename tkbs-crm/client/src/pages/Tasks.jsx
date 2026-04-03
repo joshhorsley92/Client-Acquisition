@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedTask, setExpandedTask] = useState(null);
   const navigate = useNavigate();
 
   const load = async () => {
@@ -50,44 +51,76 @@ export default function Tasks() {
         </h3>
         {items.map(t => (
           <div key={t.id} style={{
-            padding: '10px 14px', background: '#fff', border: '1px solid #E2E6EB',
-            borderRadius: 6, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            background: '#fff', border: '1px solid #E2E6EB',
+            borderRadius: 6, marginBottom: 6, overflow: 'hidden',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                onClick={() => markDone(t.id)}
-                style={{ background: 'none', border: '2px solid #E2E6EB', borderRadius: 4, width: 20, height: 20, cursor: 'pointer' }}
-              />
-              <div>
-                <div style={{ fontSize: 13 }}>{t.description}</div>
-                <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
-                  {t.company_name || 'No company'} {t.contact_name && `· ${t.contact_name}`}
+            <div style={{
+              padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                <button
+                  onClick={() => markDone(t.id)}
+                  style={{ background: 'none', border: '2px solid #E2E6EB', borderRadius: 4, width: 20, height: 20, cursor: 'pointer', flexShrink: 0 }}
+                />
+                <div
+                  onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)}
+                  style={{ cursor: 'pointer', flex: 1, minWidth: 0 }}
+                >
+                  <div style={{ fontSize: 13 }}>
+                    <span style={{ fontSize: 10, color: '#64748B', marginRight: 4 }}>
+                      {expandedTask === t.id ? '▾' : '▸'}
+                    </span>
+                    {t.description}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                    {t.company_name || 'No company'} {t.contact_name && `· ${t.contact_name}`}
+                  </div>
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                {t.due_at && (
+                  <span style={{ fontSize: 11, color: color === '#dc2626' ? '#dc2626' : '#64748B' }}>
+                    {new Date(t.due_at).toLocaleDateString()} {new Date(t.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+                <button
+                  onClick={() => navigate(`/deals/${t.deal_id}`)}
+                  style={{ background: 'none', border: 'none', color: '#00D4AA', fontSize: 11, cursor: 'pointer' }}
+                >
+                  View Deal →
+                </button>
+                <button
+                  onClick={() => deleteTask(t.id)}
+                  title="Delete task"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: '#64748B', fontSize: 16, lineHeight: 1, padding: '0 2px',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {t.due_at && (
-                <span style={{ fontSize: 11, color: color === '#dc2626' ? '#dc2626' : '#64748B' }}>
-                  {new Date(t.due_at).toLocaleDateString()} {new Date(t.due_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-              <button
-                onClick={() => navigate(`/deals/${t.deal_id}`)}
-                style={{ background: 'none', border: 'none', color: '#00D4AA', fontSize: 11, cursor: 'pointer' }}
-              >
-                View Deal →
-              </button>
-              <button
-                onClick={() => deleteTask(t.id)}
-                title="Delete task"
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: '#64748B', fontSize: 16, lineHeight: 1, padding: '0 2px',
-                }}
-              >
-                ×
-              </button>
-            </div>
+            {expandedTask === t.id && (
+              <div style={{ padding: '8px 12px 12px 44px', background: '#F7F8FA', borderTop: '1px solid #E2E6EB' }}>
+                <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
+                <textarea
+                  key={`notes-${t.id}`}
+                  defaultValue={t.notes || ''}
+                  onBlur={(e) => {
+                    if (e.target.value !== (t.notes || '')) {
+                      api.updateTask(t.id, { notes: e.target.value }).then(load);
+                    }
+                  }}
+                  placeholder="Add notes..."
+                  style={{
+                    width: '100%', minHeight: 60, padding: 8, border: '1px solid #E2E6EB',
+                    borderRadius: 4, fontSize: 12, resize: 'vertical', fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

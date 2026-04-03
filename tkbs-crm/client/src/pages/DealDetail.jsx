@@ -15,6 +15,7 @@ export default function DealDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
+  const [expandedTask, setExpandedTask] = useState(null);
 
   const loadDeal = async () => {
     try {
@@ -266,32 +267,73 @@ export default function DealDetail() {
           {tasks.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No tasks yet.</div>}
           {tasks.map((t) => (
             <div key={t.id} style={{
-              padding: '10px 12px', background: '#fff', border: '1px solid #E2E6EB',
-              borderRadius: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: '#fff', border: '1px solid #E2E6EB',
+              borderRadius: 6, marginBottom: 8, overflow: 'hidden',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 16 }}>{t.status === 'done' ? '✅' : '⬜'}</span>
-                <span style={{ fontSize: 13, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>
-                  {t.description}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {t.due_at && (
-                  <span style={{ fontSize: 11, color: '#64748B' }}>
-                    {new Date(t.due_at).toLocaleDateString()}
+              <div style={{
+                padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>{t.status === 'done' ? '✅' : '⬜'}</span>
+                  <span
+                    onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)}
+                    style={{
+                      fontSize: 13, textDecoration: t.status === 'done' ? 'line-through' : 'none',
+                      cursor: 'pointer', flex: 1, minWidth: 0,
+                    }}
+                  >
+                    <span style={{ fontSize: 10, color: '#64748B', marginRight: 4 }}>
+                      {expandedTask === t.id ? '▾' : '▸'}
+                    </span>
+                    {t.description}
                   </span>
-                )}
-                <button
-                  onClick={() => deleteTask(t.id)}
-                  title="Delete task"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: '#64748B', fontSize: 15, lineHeight: 1, padding: '0 2px',
-                  }}
-                >
-                  ×
-                </button>
+                  {t.template_key && (
+                    <span style={{
+                      fontSize: 10, color: '#64748B', background: '#E2E6EB',
+                      borderRadius: 4, padding: '1px 6px', flexShrink: 0,
+                    }}>
+                      {t.template_key}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                  {t.due_at && (
+                    <span style={{ fontSize: 11, color: '#64748B' }}>
+                      {new Date(t.due_at).toLocaleDateString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => deleteTask(t.id)}
+                    title="Delete task"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#64748B', fontSize: 15, lineHeight: 1, padding: '0 2px',
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
+              {expandedTask === t.id && (
+                <div style={{ padding: '8px 12px 12px 40px', background: '#F7F8FA', borderTop: '1px solid #E2E6EB' }}>
+                  <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
+                  <textarea
+                    key={`notes-${t.id}`}
+                    defaultValue={t.notes || ''}
+                    onBlur={(e) => {
+                      if (e.target.value !== (t.notes || '')) {
+                        api.updateTask(t.id, { notes: e.target.value }).then(loadDeal);
+                      }
+                    }}
+                    placeholder="Add notes..."
+                    style={{
+                      width: '100%', minHeight: 60, padding: 8, border: '1px solid #E2E6EB',
+                      borderRadius: 4, fontSize: 12, resize: 'vertical', fontFamily: 'inherit',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              )}
             </div>
           ))}
           <div style={{ marginTop: 16 }}>
