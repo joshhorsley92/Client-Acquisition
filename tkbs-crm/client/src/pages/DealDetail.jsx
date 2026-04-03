@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import ScriptViewer from '../components/ScriptViewer';
 import FollowUpScheduler from '../components/FollowUpScheduler';
+import EmailComposer from '../components/EmailComposer';
 
 export default function DealDetail() {
   const { id } = useParams();
@@ -12,6 +13,7 @@ export default function DealDetail() {
   const [contact, setContact] = useState(null);
   const [activities, setActivities] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [emailThread, setEmailThread] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
@@ -33,7 +35,16 @@ export default function DealDetail() {
     }
   };
 
-  useEffect(() => { loadDeal(); }, [id]);
+  const loadEmailThread = async () => {
+    try {
+      const data = await api.request(`/email/thread/${id}`);
+      setEmailThread(data.emails || []);
+    } catch (err) {
+      // Gmail may not be connected — silently ignore
+    }
+  };
+
+  useEffect(() => { loadDeal(); loadEmailThread(); }, [id]);
 
   const deleteTask = async (taskId) => {
     await api.deleteTask(taskId);
@@ -56,7 +67,7 @@ export default function DealDetail() {
   if (loading) return <div style={{ padding: 40 }}>Loading deal...</div>;
   if (!deal) return <div style={{ padding: 40 }}>Deal not found.</div>;
 
-  const tabs = ['overview', 'activity', 'tasks', 'scripts'];
+  const tabs = ['overview', 'activity', 'tasks', 'scripts', 'email'];
   const tabStyle = (t) => ({
     padding: '8px 16px', fontSize: 13, fontWeight: activeTab === t ? 600 : 400,
     color: activeTab === t ? '#00D4AA' : '#64748B', background: 'none', border: 'none',
@@ -345,6 +356,68 @@ export default function DealDetail() {
       {/* Scripts Tab */}
       {activeTab === 'scripts' && (
         <ScriptViewer deal={deal} contact={contact} company={company} />
+      )}
+
+      {/* Email Tab */}
+      {activeTab === 'email' && (
+        <div>
+          <EmailComposer
+            deal={deal}
+            contact={contact}
+            company={company}
+            onSent={() => { loadDeal(); loadEmailThread(); }}
+          />
+          <div style={{ marginTop: 20 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#1B2838' }}>Email History</h3>
+            {emailThread.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#64748B' }}>No emails sent yet.</div>
+            ) : (
+              emailThread.map((email) => (
+                <div key={email.id} style={{
+                  background: '#fff', border: '1px solid #E2E6EB', borderRadius: 6,
+                  padding: 14, marginBottom: 8,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                        background: email.direction === 'outbound' ? '#1B2838' : '#E6FAF5',
+                        color: email.direction === 'outbound' ? '#fff' : '#00D4AA',
+                      }}>
+                        {email.direction === 'outbound' ? 'SENT' : 'RECEIVED'}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#1B2838' }}>{email.subject || '(no subject)'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      {email.opened_at && (
+                        <span style={{
+                          fontSize: 10, padding: '2px 7px', borderRadius: 4,
+                          background: '#E6FAF5', color: '#00D4AA', fontWeight: 600,
+                        }}>
+                          Opened
+                        </span>
+                      )}
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>
+                        {new Date(email.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>
+                    {email.direction === 'outbound' ? `To: ${email.to_email}` : `From: ${email.from_email}`}
+                  </div>
+                  <div style={{
+                    fontSize: 12, color: '#64748B', whiteSpace: 'pre-wrap',
+                    maxHeight: 80, overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {email.body_text
+                      ? email.body_text.replace(/<[^>]+>/g, '').substring(0, 200) + (email.body_text.length > 200 ? '...' : '')
+                      : '(no preview)'}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

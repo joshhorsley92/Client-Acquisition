@@ -43,6 +43,7 @@ function createApp(testDb) {
   app.use('/api/settings', require('./routes/settings'));
   app.use('/api/reports', require('./routes/reports'));
   app.use('/api/integrations', require('./routes/integrations'));
+  app.use('/api/email', require('./routes/email'));
 
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {
