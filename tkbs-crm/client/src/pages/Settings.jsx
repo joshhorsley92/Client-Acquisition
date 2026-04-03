@@ -2,9 +2,183 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
 
+const INTEGRATION_META = {
+  gmail: {
+    label: 'Gmail',
+    description: 'Send and receive emails from deal views. Auto-log as activity with open/click tracking.',
+    fields: null, // OAuth flow (placeholder)
+    oauthPlaceholder: true,
+  },
+  slack: {
+    label: 'Slack',
+    description: 'Post notifications to Slack on stage changes, closed deals, and overdue tasks.',
+    fields: [
+      { key: 'webhookUrl', label: 'Webhook URL', type: 'text', placeholder: 'https://hooks.slack.com/services/...' },
+      { key: 'botToken', label: 'Bot Token', type: 'password', placeholder: 'xoxb-...' },
+    ],
+  },
+  google_calendar: {
+    label: 'Google Calendar',
+    description: 'Auto-create calendar events for discovery calls. Shares Gmail OAuth.',
+    fields: null,
+    oauthPlaceholder: true,
+  },
+  twilio: {
+    label: 'Twilio SMS',
+    description: 'Send and receive SMS messages from deal views. Auto-log as activity.',
+    fields: [
+      { key: 'accountSid', label: 'Account SID', type: 'text', placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' },
+      { key: 'authToken', label: 'Auth Token', type: 'password', placeholder: 'Your auth token' },
+      { key: 'phoneNumber', label: 'Phone Number', type: 'text', placeholder: '+15551234567' },
+    ],
+  },
+  webhooks: {
+    label: 'Webhooks',
+    description: 'Fire outbound webhooks on CRM events. Compatible with Zapier, Make, and n8n.',
+    fields: null,
+    webhooksPlaceholder: true,
+  },
+};
+
+function IntegrationCard({ integration, onToggle, onSave }) {
+  const meta = INTEGRATION_META[integration.type];
+  if (!meta) return null;
+
+  const [expanded, setExpanded] = useState(false);
+  const [config, setConfig] = useState(() => {
+    try { return JSON.parse(integration.config || '{}'); } catch { return {}; }
+  });
+  const [saving, setSaving] = useState(false);
+
+  const isConnected = integration.enabled === 1;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(integration.type, config);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8,
+      marginBottom: 12, overflow: 'hidden',
+    }}>
+      <div style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>{meta.label}</span>
+            <span style={{
+              fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
+              background: isConnected ? '#E6FAF5' : '#F7F8FA',
+              color: isConnected ? '#00D4AA' : '#94A3B8',
+              border: `1px solid ${isConnected ? '#00D4AA' : '#E2E6EB'}`,
+            }}>
+              {isConnected ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+          <p style={{ fontSize: 12, color: '#64748B', margin: '4px 0 0' }}>{meta.description}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 16 }}>
+          <button
+            onClick={() => onToggle(integration.type, integration.enabled)}
+            style={{
+              padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+              background: isConnected ? '#00D4AA' : '#E2E6EB',
+              color: isConnected ? '#1B2838' : '#64748B',
+              border: 'none', fontWeight: 600,
+            }}
+          >
+            {isConnected ? 'Enabled' : 'Disabled'}
+          </button>
+          <button
+            onClick={() => setExpanded(e => !e)}
+            style={{
+              padding: '5px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+              background: 'none', border: '1px solid #E2E6EB', color: '#1B2838', fontWeight: 600,
+            }}
+          >
+            {expanded ? 'Close' : 'Configure'}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: '0 16px 16px', borderTop: '1px solid #F1F5F9' }}>
+          <div style={{ paddingTop: 14 }}>
+            {meta.oauthPlaceholder && (
+              <div>
+                <button style={{
+                  padding: '8px 16px', background: '#1B2838', color: '#fff',
+                  border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}>
+                  Connect Google Account
+                </button>
+                <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 8 }}>
+                  OAuth flow coming in Phase 4, Task 3.
+                </p>
+              </div>
+            )}
+
+            {meta.webhooksPlaceholder && (
+              <div>
+                <p style={{ fontSize: 13, color: '#64748B', margin: '0 0 8px' }}>
+                  Configure outbound webhooks to fire on deal stage changes and other CRM events.
+                </p>
+                <button style={{
+                  padding: '8px 16px', background: '#E2E6EB', color: '#1B2838',
+                  border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'not-allowed',
+                  opacity: 0.7,
+                }}>
+                  Manage Webhooks (coming soon)
+                </button>
+              </div>
+            )}
+
+            {meta.fields && meta.fields.map(field => (
+              <div key={field.key} style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>
+                  {field.label}
+                </label>
+                <input
+                  type={field.type}
+                  value={config[field.key] || ''}
+                  placeholder={field.placeholder}
+                  onChange={(e) => setConfig(c => ({ ...c, [field.key]: e.target.value }))}
+                  style={{
+                    width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
+                    borderRadius: 4, fontSize: 13, boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            ))}
+
+            {meta.fields && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                style={{
+                  padding: '8px 20px', background: '#00D4AA', color: '#1B2838',
+                  border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                  cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+                }}
+              >
+                {saving ? 'Saving...' : 'Save Config'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [actions, setActions] = useState([]);
   const [users, setUsers] = useState([]);
+  const [integrations, setIntegrations] = useState([]);
   const [cliStatus, setCliStatus] = useState(null);
   const [showNewUser, setShowNewUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'member' });
@@ -14,7 +188,20 @@ export default function Settings() {
     api.request('/settings/actions').then(d => setActions(d.actions)).catch(() => {});
     api.request('/settings/users').then(d => setUsers(d.users)).catch(() => {});
     api.request('/settings/cli-status').then(d => setCliStatus(d.available)).catch(() => setCliStatus(false));
+    api.request('/integrations').then(d => setIntegrations(d.integrations)).catch(() => {});
   }, []);
+
+  const toggleIntegration = async (type, currentEnabled) => {
+    await api.request(`/integrations/${type}`, { method: 'PATCH', body: { enabled: !currentEnabled } });
+    const d = await api.request('/integrations');
+    setIntegrations(d.integrations);
+  };
+
+  const saveIntegrationConfig = async (type, config) => {
+    await api.request(`/integrations/${type}`, { method: 'PATCH', body: { config } });
+    const d = await api.request('/integrations');
+    setIntegrations(d.integrations);
+  };
 
   const toggleAction = async (id, enabled) => {
     await api.request(`/settings/actions/${id}`, { method: 'PATCH', body: { enabled: !enabled } });
@@ -61,6 +248,7 @@ export default function Settings() {
       <div style={{ borderBottom: '1px solid #E2E6EB', marginBottom: 20 }}>
         <button onClick={() => setActiveTab('actions')} style={tabStyle('actions')}>Stage Actions</button>
         <button onClick={() => setActiveTab('users')} style={tabStyle('users')}>Team</button>
+        <button onClick={() => setActiveTab('integrations')} style={tabStyle('integrations')}>Integrations</button>
       </div>
 
       {activeTab === 'actions' && (
@@ -86,6 +274,27 @@ export default function Settings() {
                 {a.enabled ? 'Enabled' : 'Disabled'}
               </button>
             </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'integrations' && (
+        <div>
+          <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>
+            Connect external services to automate your sales workflow. All integrations are independently toggleable.
+          </p>
+          {integrations.length === 0 && (
+            <div style={{ color: '#94A3B8', fontSize: 13, textAlign: 'center', padding: 40 }}>
+              Loading integrations...
+            </div>
+          )}
+          {integrations.map(integration => (
+            <IntegrationCard
+              key={integration.type}
+              integration={integration}
+              onToggle={toggleIntegration}
+              onSave={saveIntegrationConfig}
+            />
           ))}
         </div>
       )}
