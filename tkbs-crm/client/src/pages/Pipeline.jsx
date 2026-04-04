@@ -5,6 +5,7 @@ import DealCard from '../components/DealCard';
 import Modal from '../components/Modal';
 
 const STAGES = [
+  { id: 'prospect', label: 'Prospect' },
   { id: 'lead', label: 'Lead' },
   { id: 'outreach', label: 'Outreach' },
   { id: 'discovery_call', label: 'Discovery Call' },
@@ -21,6 +22,7 @@ export default function Pipeline() {
     company_name: '',
     contact_id: '',
     contact_name: '',
+    stage: 'prospect',
     source: 'referral',
     estimated_value: '',
   });
@@ -86,11 +88,12 @@ export default function Pipeline() {
       await api.createDeal({
         company_id: companyId,
         contact_id: contactId,
+        stage: newDeal.stage,
         source: newDeal.source,
         estimated_value: parseFloat(newDeal.estimated_value) || 0,
       });
       setShowNewDeal(false);
-      setNewDeal({ company_id: '', company_name: '', contact_id: '', contact_name: '', source: 'referral', estimated_value: '' });
+      setNewDeal({ company_id: '', company_name: '', contact_id: '', contact_name: '', stage: 'prospect', source: 'referral', estimated_value: '' });
       loadDeals();
     } catch (err) {
       alert('Failed to create deal: ' + err.message);
@@ -206,6 +209,16 @@ export default function Pipeline() {
                 </>
               );
             })()}
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Stage</label>
+            <select
+              value={newDeal.stage} onChange={(e) => setNewDeal({ ...newDeal, stage: e.target.value })}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14 }}
+            >
+              <option value="prospect">Prospect</option>
+              <option value="lead">Lead (already qualified)</option>
+            </select>
           </div>
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>

@@ -8,6 +8,7 @@ VALUES ('Josh Horsley', 'josh@tkbsmarketing.com', '$2a$10$placeholder_will_be_se
 
 -- Default stage actions
 INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES
+  ('prospect', 'create_tasks', '{"tasks":[{"description":"Research prospect digital presence","due_offset_days":0},{"description":"Qualify — worth reaching out?","due_offset_days":1}]}', 0),
   ('lead', 'create_tasks', '{"tasks":[{"description":"Research prospect","due_offset_days":0},{"description":"Send first outreach","due_offset_days":1}]}', 0),
   ('outreach', 'start_cadence', '{"reminders":[{"day":3,"template":"cold_email_2"},{"day":7,"template":"cold_email_3"},{"day":14,"template":"cold_email_4"}],"stale_after_days":21}', 0),
   ('discovery_call', 'trigger_skill', '{"skill":"tkbs-initial-analysis","prompt_template":"Build a presentation for {company}, {contact}, located in {location}, {industry} business, {type}. Additional context: {source_detail}, {notes}"}', 0),

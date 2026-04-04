@@ -51,21 +51,29 @@ router.get('/:id', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { contact_id, company_id, source, source_detail, estimated_value, package_type, services_discussed } = req.body;
+  const { contact_id, company_id, stage, source, source_detail, estimated_value, package_type, services_discussed } = req.body;
   if (!contact_id && !company_id) {
     return res.status(400).json({ error: 'contact_id or company_id is required' });
   }
 
+  const dealStage = stage || 'lead';
+
   const result = req.db.prepare(
     `INSERT INTO deals (contact_id, company_id, stage, source, source_detail, estimated_value, package_type, services_discussed, owner_id)
-     VALUES (?, ?, 'lead', ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    contact_id || null, company_id || null, source || null, source_detail || null,
+    contact_id || null, company_id || null, dealStage, source || null, source_detail || null,
     estimated_value || 0, package_type || null, JSON.stringify(services_discussed || []),
     req.user.id
   );
 
   const deal = req.db.prepare('SELECT * FROM deals WHERE id = ?').get(result.lastInsertRowid);
+
+  // Fire stage actions for initial stage
+  try {
+    executeStageActions(req.db, deal.id, dealStage, req.user.id);
+  } catch (e) {}
+
   res.status(201).json({ deal });
 });
 
