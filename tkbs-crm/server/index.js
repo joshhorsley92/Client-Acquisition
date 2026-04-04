@@ -46,6 +46,9 @@ function createApp(testDb) {
   app.use('/api/email', require('./routes/email'));
   app.use('/api/slack', require('./routes/slack'));
   app.use('/api/calendar', require('./routes/calendar'));
+  app.use('/api/webhooks', require('./routes/webhooks'));
+  app.use('/api/sms', require('./routes/sms'));
+  app.use('/api/intake', require('./routes/intake'));
 
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {

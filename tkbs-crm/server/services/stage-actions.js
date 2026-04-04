@@ -1,4 +1,5 @@
 const { postNotification, buildStageChangeNotification, buildNewLeadNotification } = require('./slack');
+const { dispatchWebhooks } = require('./webhook-dispatcher');
 
 /**
  * Executes configured actions when a deal enters a new stage.
@@ -84,6 +85,19 @@ function executeStageActions(db, dealId, newStage, userId) {
       postNotification(db, notif).catch(() => {});
     }
   } catch (e) { /* Slack notification is best-effort */ }
+
+  // Dispatch outbound webhooks
+  try {
+    const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId);
+    const company = deal?.company_id ? db.prepare('SELECT * FROM companies WHERE id = ?').get(deal.company_id) : null;
+    const contact = deal?.contact_id ? db.prepare('SELECT * FROM contacts WHERE id = ?').get(deal.contact_id) : null;
+
+    const eventName = newStage === 'lead' ? 'deal.created' :
+                       newStage === 'closed_won' ? 'deal.closed_won' :
+                       newStage === 'closed_lost' ? 'deal.closed_lost' : 'deal.stage_changed';
+
+    dispatchWebhooks(db, eventName, { deal, company, contact }).catch(() => {});
+  } catch (e) { /* best effort */ }
 
   return result;
 }
