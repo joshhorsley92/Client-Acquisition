@@ -4,21 +4,23 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 
 router.get('/', (req, res) => {
-  let query = 'SELECT * FROM contacts';
+  let query = 'SELECT contacts.*, companies.name as company_name FROM contacts LEFT JOIN companies ON contacts.company_id = companies.id';
   const params = [];
 
   if (req.query.company_id) {
-    query += ' WHERE company_id = ?';
+    query += ' WHERE contacts.company_id = ?';
     params.push(req.query.company_id);
   }
 
-  query += ' ORDER BY created_at DESC';
+  query += ' ORDER BY contacts.created_at DESC';
   const contacts = req.db.prepare(query).all(...params);
   res.json({ contacts });
 });
 
 router.get('/:id', (req, res) => {
-  const contact = req.db.prepare('SELECT * FROM contacts WHERE id = ?').get(req.params.id);
+  const contact = req.db.prepare(
+    'SELECT contacts.*, companies.name as company_name FROM contacts LEFT JOIN companies ON contacts.company_id = companies.id WHERE contacts.id = ?'
+  ).get(req.params.id);
   if (!contact) return res.status(404).json({ error: 'Contact not found' });
   res.json({ contact });
 });
