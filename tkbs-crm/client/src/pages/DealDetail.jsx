@@ -491,6 +491,7 @@ export default function DealDetail() {
             deal={deal}
             contact={contact}
             company={company}
+            stage={deal.stage}
             onSent={() => { loadDeal(); loadEmailThread(); }}
           />
           <div style={{ marginTop: 16 }}>
