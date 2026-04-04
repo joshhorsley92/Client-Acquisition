@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import ScriptViewer from '../components/ScriptViewer';
 import FollowUpScheduler from '../components/FollowUpScheduler';
 import EmailComposer from '../components/EmailComposer';
+import SmsComposer from '../components/SmsComposer';
 
 export default function DealDetail() {
   const { id } = useParams();
@@ -479,6 +480,13 @@ export default function DealDetail() {
             company={company}
             onSent={() => { loadDeal(); loadEmailThread(); }}
           />
+          <div style={{ marginTop: 16 }}>
+            <SmsComposer
+              deal={deal}
+              contact={contact}
+              onSent={loadDeal}
+            />
+          </div>
           <div style={{ marginTop: 20 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#1B2838' }}>Email History</h3>
             {emailThread.length === 0 ? (

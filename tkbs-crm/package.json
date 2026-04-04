@@ -20,7 +20,8 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "googleapis": "^171.4.0"
+    "googleapis": "^171.4.0",
+    "twilio": "^5.13.1"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
