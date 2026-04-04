@@ -32,10 +32,10 @@ router.get('/google/callback', async (req, res) => {
     ).run(JSON.stringify({ tokens, email }));
 
     // Redirect back to settings page
-    res.redirect('/settings?connected=google');
+    res.redirect((process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173') + '/settings?connected=google');
   } catch (err) {
     console.error('Google OAuth error:', err);
-    res.redirect('/settings?error=google_auth_failed');
+    res.redirect((process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173') + '/settings?error=google_auth_failed');
   }
 });
 

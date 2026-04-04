@@ -1,0 +1,8 @@
+.superpowers/
+cookies.txt
+**/cookies.txt
+*.db
+*.db-shm
+*.db-wal
+node_modules/
+.env
