@@ -18,6 +18,9 @@ export default function DealDetail() {
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [expandedTask, setExpandedTask] = useState(null);
+  const [showMeetingForm, setShowMeetingForm] = useState(false);
+  const [meetingForm, setMeetingForm] = useState({ summary: '', date: '', time: '', attendee_email: '' });
+  const [meetingStatus, setMeetingStatus] = useState(null);
 
   const loadDeal = async () => {
     try {
@@ -45,6 +48,38 @@ export default function DealDetail() {
   };
 
   useEffect(() => { loadDeal(); loadEmailThread(); }, [id]);
+
+  useEffect(() => {
+    if (company && contact) {
+      setMeetingForm(f => ({
+        ...f,
+        summary: f.summary || `Discovery Call — ${company.name}`,
+        attendee_email: f.attendee_email || contact.email || '',
+      }));
+    }
+  }, [company, contact]);
+
+  const scheduleMeeting = async (e) => {
+    e.preventDefault();
+    setMeetingStatus(null);
+    const { summary, date, time, attendee_email } = meetingForm;
+    if (!summary || !date || !time) {
+      setMeetingStatus({ error: 'Summary, date, and time are required.' });
+      return;
+    }
+    const startTime = new Date(`${date}T${time}`).toISOString();
+    try {
+      const res = await api.request('/calendar/events', {
+        method: 'POST',
+        body: { deal_id: parseInt(id), summary, start_time: startTime, attendee_email: attendee_email || undefined },
+      });
+      setMeetingStatus({ ok: true, link: res.event?.link });
+      setShowMeetingForm(false);
+      loadDeal();
+    } catch (err) {
+      setMeetingStatus({ error: err.message || 'Failed to create event.' });
+    }
+  };
 
   const deleteTask = async (taskId) => {
     await api.deleteTask(taskId);
@@ -164,6 +199,83 @@ export default function DealDetail() {
               }}
             />
           </div>
+          {/* Schedule Meeting card */}
+          <div style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showMeetingForm ? 12 : 0 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1B2838', margin: 0 }}>Schedule Meeting</h3>
+              <button
+                onClick={() => { setShowMeetingForm(!showMeetingForm); setMeetingStatus(null); }}
+                style={{
+                  background: showMeetingForm ? '#E2E6EB' : '#00D4AA', color: showMeetingForm ? '#64748B' : '#1B2838',
+                  border: 'none', borderRadius: 4, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {showMeetingForm ? 'Cancel' : '+ Schedule'}
+              </button>
+            </div>
+            {meetingStatus?.ok && (
+              <div style={{ fontSize: 13, color: '#00D4AA', marginTop: 8 }}>
+                Event created!{meetingStatus.link && <> <a href={meetingStatus.link} target="_blank" rel="noreferrer" style={{ color: '#00D4AA' }}>View in Google Calendar</a></>}
+              </div>
+            )}
+            {meetingStatus?.error && (
+              <div style={{ fontSize: 13, color: '#dc2626', marginTop: 8 }}>{meetingStatus.error}</div>
+            )}
+            {showMeetingForm && (
+              <form onSubmit={scheduleMeeting} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 3 }}>Summary</label>
+                  <input
+                    value={meetingForm.summary}
+                    onChange={(e) => setMeetingForm(f => ({ ...f, summary: e.target.value }))}
+                    placeholder="Discovery Call — Company Name"
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 3 }}>Date</label>
+                    <input
+                      type="date"
+                      value={meetingForm.date}
+                      onChange={(e) => setMeetingForm(f => ({ ...f, date: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 3 }}>Time</label>
+                    <input
+                      type="time"
+                      value={meetingForm.time}
+                      onChange={(e) => setMeetingForm(f => ({ ...f, time: e.target.value }))}
+                      style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 3 }}>Attendee Email</label>
+                  <input
+                    type="email"
+                    value={meetingForm.attendee_email}
+                    onChange={(e) => setMeetingForm(f => ({ ...f, attendee_email: e.target.value }))}
+                    placeholder="contact@example.com"
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  style={{
+                    background: '#00D4AA', color: '#1B2838', border: 'none',
+                    borderRadius: 4, padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', alignSelf: 'flex-start',
+                  }}
+                >
+                  Create Event
+                </button>
+              </form>
+            )}
+          </div>
+
           {/* Upcoming Tasks card */}
           {(() => {
             const now = new Date();
