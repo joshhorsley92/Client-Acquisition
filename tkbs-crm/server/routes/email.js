@@ -109,8 +109,12 @@ router.post('/send', async (req, res) => {
 
 // Manual sync trigger
 router.post('/sync', async (req, res) => {
-  const result = await syncInboundEmails(req.db);
-  res.json(result);
+  try {
+    const result = await syncInboundEmails(req.db);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get email thread for a deal

@@ -1,70 +1,119 @@
-const { listNewMessages } = require('./gmail');
+const { google } = require('googleapis');
+const { getAuthedClient } = require('./gmail');
 
 /**
- * Syncs inbound emails from Gmail, matches to contacts, links to deals.
- * Should be called periodically (e.g., every 5 minutes).
+ * Polls Gmail for new messages and imports ones that match CRM contacts.
+ *
+ * Filters:
+ * - Only imports emails from senders that match a contact's email in the DB
+ * - Skips emails from the user's own address (outbound tracked separately)
+ * - Only looks at emails from the last 24 hours (or since last sync)
+ * - Skips emails already imported (by gmail_message_id)
+ * - Optional: only sync emails with a specific Gmail label
  */
 async function syncInboundEmails(db) {
-  const gmail = db.prepare("SELECT * FROM integration_settings WHERE type = 'gmail'").get();
-  if (!gmail || !gmail.enabled) return { synced: 0, reason: 'Gmail not connected' };
+  const settings = db.prepare("SELECT * FROM integration_settings WHERE type = 'gmail'").get();
+  if (!settings || !settings.enabled) return { synced: 0, skipped: 0 };
 
-  const config = JSON.parse(gmail.config);
-  if (!config.tokens) return { synced: 0, reason: 'No tokens' };
+  const config = JSON.parse(settings.config || '{}');
+  if (!config.tokens) return { synced: 0, skipped: 0 };
 
-  // Get last sync time
-  const lastSync = config.lastSync || null;
+  const oauth2Client = getAuthedClient(config.tokens);
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  // Get all contact emails for matching
+  const contacts = db.prepare('SELECT id, email FROM contacts WHERE email IS NOT NULL AND email != ""').all();
+  const contactEmailMap = {};
+  contacts.forEach(c => { contactEmailMap[c.email.toLowerCase()] = c.id; });
+
+  if (Object.keys(contactEmailMap).length === 0) return { synced: 0, skipped: 0, reason: 'No contacts with emails' };
+
+  // Build search query — emails from the last 24 hours, in inbox
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const afterDate = oneDayAgo.toISOString().split('T')[0].replace(/-/g, '/');
+
+  // Optional label filter from config
+  const labelFilter = config.sync_label ? `label:${config.sync_label}` : 'in:inbox';
+  const query = `${labelFilter} after:${afterDate} -from:${config.email}`;
+
   let synced = 0;
+  let skipped = 0;
 
   try {
-    const messages = await listNewMessages(config.tokens, lastSync);
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 50,
+    });
+
+    const messages = listRes.data.messages || [];
 
     for (const msg of messages) {
-      // Skip if already stored
+      // Skip if already imported
       const existing = db.prepare('SELECT id FROM email_messages WHERE gmail_message_id = ?').get(msg.id);
-      if (existing) continue;
+      if (existing) { skipped++; continue; }
 
-      // Extract email address from "Name <email>" format
-      const emailMatch = msg.from.match(/<(.+?)>/) || [null, msg.from.trim()];
-      const fromEmail = emailMatch[1].toLowerCase();
+      // Fetch full message
+      const fullMsg = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full',
+      });
 
-      // Skip outbound (from our own email)
-      if (fromEmail === config.email) continue;
+      const headers = fullMsg.data.payload.headers;
+      const fromHeader = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+      const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(no subject)';
+      const date = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
 
-      // Match to contact
-      const contact = db.prepare('SELECT * FROM contacts WHERE LOWER(email) = ?').get(fromEmail);
-      if (!contact) continue; // Only sync emails from known contacts
+      // Extract email from "Name <email>" format
+      const emailMatch = fromHeader.match(/<(.+?)>/) || [null, fromHeader.trim()];
+      const senderEmail = (emailMatch[1] || '').toLowerCase().trim();
 
-      // Find active deal for this contact
+      // Only import if sender matches a CRM contact
+      const contactId = contactEmailMap[senderEmail];
+      if (!contactId) { skipped++; continue; }
+
+      // Find the contact's active deal
       const deal = db.prepare(
         "SELECT * FROM deals WHERE contact_id = ? AND stage NOT IN ('closed_won', 'closed_lost') ORDER BY updated_at DESC LIMIT 1"
-      ).get(contact.id);
+      ).get(contactId);
 
-      if (!deal) continue; // Only link to active deals
+      // Extract body text
+      let bodyText = '';
+      if (fullMsg.data.payload.parts) {
+        const textPart = fullMsg.data.payload.parts.find(p => p.mimeType === 'text/plain');
+        if (textPart && textPart.body.data) {
+          bodyText = Buffer.from(textPart.body.data, 'base64url').toString('utf-8');
+        }
+      } else if (fullMsg.data.payload.body?.data) {
+        bodyText = Buffer.from(fullMsg.data.payload.body.data, 'base64url').toString('utf-8');
+      }
 
       // Store email
       db.prepare(
         `INSERT INTO email_messages (deal_id, contact_id, direction, gmail_message_id, gmail_thread_id, subject, body_text, from_email, to_email, sent_at)
          VALUES (?, ?, 'inbound', ?, ?, ?, ?, ?, ?, ?)`
-      ).run(deal.id, contact.id, msg.id, msg.threadId, msg.subject, msg.bodyText, fromEmail, msg.to, msg.date);
+      ).run(
+        deal?.id || null, contactId, msg.id, fullMsg.data.threadId,
+        subject, bodyText, senderEmail, config.email,
+        date ? new Date(date).toISOString().replace('Z', '').split('.')[0] : null
+      );
 
-      // Log activity
-      db.prepare(
-        `INSERT INTO activities (deal_id, contact_id, type, content, metadata)
-         VALUES (?, ?, 'email', ?, ?)`
-      ).run(deal.id, contact.id, `Inbound email: ${msg.subject}`, JSON.stringify({ gmail_message_id: msg.id, from: fromEmail }));
+      // Log activity on the deal
+      if (deal) {
+        db.prepare(
+          "INSERT INTO activities (deal_id, contact_id, type, content, metadata) VALUES (?, ?, 'email', ?, ?)"
+        ).run(deal.id, contactId, `Email received: ${subject}`, JSON.stringify({ gmail_message_id: msg.id, from: senderEmail }));
+      }
 
       synced++;
     }
-
-    // Update last sync time
-    config.lastSync = new Date().toISOString();
-    db.prepare("UPDATE integration_settings SET config = ?, updated_at = datetime('now') WHERE type = 'gmail'").run(JSON.stringify(config));
-
-    return { synced };
   } catch (err) {
-    console.error('Email sync error:', err);
-    return { synced: 0, error: err.message };
+    console.error('Gmail sync error:', err.message);
+    return { synced, skipped, error: err.message };
   }
+
+  return { synced, skipped };
 }
 
 module.exports = { syncInboundEmails };

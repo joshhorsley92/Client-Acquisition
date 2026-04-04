@@ -137,6 +137,37 @@ function IntegrationCard({ integration, onToggle, onSave, onDisconnectGoogle }) 
                     }}>
                       <span style={{ fontSize: 13, color: '#00D4AA', fontWeight: 600 }}>Connected as {googleEmail}</span>
                     </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>
+                        Sync Label (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={config.sync_label || ''}
+                        placeholder="e.g. CRM — leave blank to sync all inbox"
+                        onChange={(e) => setConfig(c => ({ ...c, sync_label: e.target.value }))}
+                        style={{
+                          width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
+                          borderRadius: 4, fontSize: 13, boxSizing: 'border-box',
+                        }}
+                      />
+                      <p style={{ fontSize: 11, color: '#94A3B8', margin: '4px 0 0' }}>
+                        Only sync emails with this Gmail label. Leave blank to sync all inbox emails from known contacts.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      style={{
+                        padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
+                        border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                        cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+                        marginBottom: 12,
+                      }}
+                    >
+                      {saving ? 'Saving...' : 'Save Config'}
+                    </button>
+                    <br />
                     <button
                       onClick={onDisconnectGoogle}
                       style={{

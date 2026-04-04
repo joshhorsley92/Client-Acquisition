@@ -22,6 +22,7 @@ export default function DealDetail() {
   const [showMeetingForm, setShowMeetingForm] = useState(false);
   const [meetingForm, setMeetingForm] = useState({ summary: '', date: '', time: '', attendee_email: '' });
   const [meetingStatus, setMeetingStatus] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const loadDeal = async () => {
     try {
@@ -98,6 +99,18 @@ export default function DealDetail() {
   const updateField = async (field, value) => {
     await api.updateDeal(id, { [field]: value });
     loadDeal();
+  };
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await api.request('/email/sync', { method: 'POST' });
+      await loadEmailThread();
+    } catch (err) {
+      // Silently ignore — Gmail may not be connected
+    } finally {
+      setSyncing(false);
+    }
   };
 
   if (loading) return <div style={{ padding: 40 }}>Loading deal...</div>;
@@ -488,7 +501,21 @@ export default function DealDetail() {
             />
           </div>
           <div style={{ marginTop: 20 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#1B2838' }}>Email History</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1B2838', margin: 0 }}>Email History</h3>
+              <button
+                onClick={syncNow}
+                disabled={syncing}
+                style={{
+                  padding: '5px 12px', fontSize: 12, fontWeight: 600, borderRadius: 4,
+                  background: syncing ? '#E2E6EB' : '#F7F8FA',
+                  color: syncing ? '#94A3B8' : '#64748B',
+                  border: '1px solid #E2E6EB', cursor: syncing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
             {emailThread.length === 0 ? (
               <div style={{ fontSize: 13, color: '#64748B' }}>No emails sent yet.</div>
             ) : (

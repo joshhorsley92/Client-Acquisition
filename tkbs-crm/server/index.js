@@ -1,3 +1,4 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
@@ -75,14 +76,22 @@ if (require.main === module) {
     console.log(`TKBS CRM server running on http://localhost:${PORT}`);
   });
 
-  // Sync inbound emails every 5 minutes (dev only; production should use a proper job scheduler)
-  if (process.env.NODE_ENV !== 'production') {
-    const { syncInboundEmails } = require('./services/email-sync');
-    const { getDb } = require('./db');
-    setInterval(() => {
-      try { syncInboundEmails(getDb()); } catch (e) { console.error('Sync error:', e); }
-    }, 5 * 60 * 1000);
-  }
+  // Start Gmail sync polling (every 5 minutes)
+  setInterval(async () => {
+    try {
+      const { syncInboundEmails } = require('./services/email-sync');
+      const { getDb } = require('./db');
+      const db = getDb();
+      const result = await syncInboundEmails(db);
+      if (result.synced > 0) {
+        console.log(`Gmail sync: ${result.synced} new emails imported, ${result.skipped} skipped`);
+      }
+    } catch (err) {
+      // Silent fail — sync is best effort
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+
+  console.log('Gmail auto-sync enabled (every 5 minutes)');
 }
 
 module.exports = { createApp };
