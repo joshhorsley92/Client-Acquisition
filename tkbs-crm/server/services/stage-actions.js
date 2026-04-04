@@ -1,3 +1,5 @@
+const { postNotification, buildStageChangeNotification, buildNewLeadNotification } = require('./slack');
+
 /**
  * Executes configured actions when a deal enters a new stage.
  * Returns a summary of what was done.
@@ -66,6 +68,22 @@ function executeStageActions(db, dealId, newStage, userId) {
         break;
     }
   }
+
+  // Auto-notify Slack on stage changes if enabled
+  try {
+    const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId);
+    const company = deal?.company_id ? db.prepare('SELECT * FROM companies WHERE id = ?').get(deal.company_id) : null;
+    const contact = deal?.contact_id ? db.prepare('SELECT * FROM contacts WHERE id = ?').get(deal.contact_id) : null;
+    const user = userId ? db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) : null;
+
+    if (newStage === 'lead') {
+      const notif = buildNewLeadNotification(deal, company, contact);
+      postNotification(db, notif).catch(() => {});
+    } else {
+      const notif = buildStageChangeNotification(deal, company, contact, null, newStage, user);
+      postNotification(db, notif).catch(() => {});
+    }
+  } catch (e) { /* Slack notification is best-effort */ }
 
   return result;
 }
