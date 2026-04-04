@@ -4,6 +4,35 @@ const { sendEmail } = require('../services/gmail');
 const { syncInboundEmails } = require('../services/email-sync');
 const crypto = require('crypto');
 
+// Rewrite links in HTML body to route through click tracking
+function rewriteLinks(html, trackingId, baseUrl) {
+  return html.replace(/href="(https?:\/\/[^"]+)"/g, (match, url) => {
+    const trackUrl = `${baseUrl}/api/email/click/${trackingId}?url=${encodeURIComponent(url)}`;
+    return `href="${trackUrl}"`;
+  });
+}
+
+// Click tracking redirect (no auth — needs to be publicly accessible)
+router.get('/click/:trackingId', (req, res) => {
+  const { trackingId } = req.params;
+  const { url } = req.query;
+  if (!url) return res.status(400).send('Missing url');
+
+  req.db.prepare(
+    "UPDATE email_messages SET clicked_at = datetime('now') WHERE tracking_pixel_id = ? AND clicked_at IS NULL"
+  ).run(trackingId);
+
+  // Log activity on click
+  const email = req.db.prepare('SELECT * FROM email_messages WHERE tracking_pixel_id = ?').get(trackingId);
+  if (email && email.deal_id) {
+    req.db.prepare(
+      "INSERT INTO activities (deal_id, contact_id, type, content, metadata) VALUES (?, ?, 'system', ?, ?)"
+    ).run(email.deal_id, email.contact_id, 'Link clicked in email', JSON.stringify({ url, email_id: email.id }));
+  }
+
+  res.redirect(url);
+});
+
 // Tracking pixel endpoint (no auth — needs to be publicly accessible)
 router.get('/track/:pixelId', (req, res) => {
   const { pixelId } = req.params;
@@ -41,10 +70,12 @@ router.post('/send', async (req, res) => {
 
   // Generate tracking pixel ID
   const trackingPixelId = crypto.randomUUID();
-  const trackingPixel = `<img src="${process.env.PUBLIC_URL || 'http://localhost:3001'}/api/email/track/${trackingPixelId}" width="1" height="1" style="display:none" />`;
+  const baseUrl = process.env.PUBLIC_URL || 'http://localhost:3001';
+  const trackingPixel = `<img src="${baseUrl}/api/email/track/${trackingPixelId}" width="1" height="1" style="display:none" />`;
 
-  // Append tracking pixel to body
-  const bodyWithTracking = body + trackingPixel;
+  // Rewrite links for click tracking, then append tracking pixel
+  const bodyWithLinks = rewriteLinks(body, trackingPixelId, baseUrl);
+  const bodyWithTracking = bodyWithLinks + trackingPixel;
 
   try {
     const result = await sendEmail(config.tokens, {

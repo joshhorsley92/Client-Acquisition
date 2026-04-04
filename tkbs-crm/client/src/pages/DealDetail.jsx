@@ -397,6 +397,14 @@ export default function DealDetail() {
                           Opened
                         </span>
                       )}
+                      {email.clicked_at && (
+                        <span style={{
+                          fontSize: 10, padding: '2px 7px', borderRadius: 4,
+                          background: '#EFF6FF', color: '#3B82F6', fontWeight: 600,
+                        }}>
+                          Clicked
+                        </span>
+                      )}
                       <span style={{ fontSize: 11, color: '#94A3B8' }}>
                         {new Date(email.created_at).toLocaleString()}
                       </span>
