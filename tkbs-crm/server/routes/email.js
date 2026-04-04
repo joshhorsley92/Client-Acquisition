@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
 const { sendEmail } = require('../services/gmail');
+const { syncInboundEmails } = require('../services/email-sync');
 const crypto = require('crypto');
 
 // Tracking pixel endpoint (no auth — needs to be publicly accessible)
@@ -73,6 +74,12 @@ router.post('/send', async (req, res) => {
     console.error('Gmail send error:', err);
     res.status(500).json({ error: 'Failed to send email: ' + err.message });
   }
+});
+
+// Manual sync trigger
+router.post('/sync', async (req, res) => {
+  const result = await syncInboundEmails(req.db);
+  res.json(result);
 });
 
 // Get email thread for a deal

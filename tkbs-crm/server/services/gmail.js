@@ -64,4 +64,48 @@ async function getUserEmail(tokens) {
   return profile.data.emailAddress;
 }
 
-module.exports = { getOAuth2Client, getAuthUrl, getTokensFromCode, getAuthedClient, sendEmail, getUserEmail };
+async function listNewMessages(tokens, afterTimestamp) {
+  const oauth2Client = getAuthedClient(tokens);
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  const query = afterTimestamp ? `after:${Math.floor(new Date(afterTimestamp).getTime() / 1000)}` : 'newer_than:1d';
+
+  const list = await gmail.users.messages.list({
+    userId: 'me',
+    q: query,
+    maxResults: 50,
+  });
+
+  if (!list.data.messages) return [];
+
+  const messages = [];
+  for (const msg of list.data.messages) {
+    const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+    const headers = full.data.payload.headers;
+    const from = headers.find(h => h.name === 'From')?.value || '';
+    const to = headers.find(h => h.name === 'To')?.value || '';
+    const subject = headers.find(h => h.name === 'Subject')?.value || '';
+    const date = headers.find(h => h.name === 'Date')?.value || '';
+
+    // Extract body
+    let bodyText = '';
+    if (full.data.payload.body?.data) {
+      bodyText = Buffer.from(full.data.payload.body.data, 'base64url').toString();
+    } else if (full.data.payload.parts) {
+      const textPart = full.data.payload.parts.find(p => p.mimeType === 'text/plain');
+      if (textPart?.body?.data) {
+        bodyText = Buffer.from(textPart.body.data, 'base64url').toString();
+      }
+    }
+
+    messages.push({
+      id: msg.id,
+      threadId: full.data.threadId,
+      from, to, subject, date, bodyText,
+    });
+  }
+
+  return messages;
+}
+
+module.exports = { getOAuth2Client, getAuthUrl, getTokensFromCode, getAuthedClient, sendEmail, getUserEmail, listNewMessages };

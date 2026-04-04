@@ -69,6 +69,15 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`TKBS CRM server running on http://localhost:${PORT}`);
   });
+
+  // Sync inbound emails every 5 minutes (dev only; production should use a proper job scheduler)
+  if (process.env.NODE_ENV !== 'production') {
+    const { syncInboundEmails } = require('./services/email-sync');
+    const { getDb } = require('./db');
+    setInterval(() => {
+      try { syncInboundEmails(getDb()); } catch (e) { console.error('Sync error:', e); }
+    }, 5 * 60 * 1000);
+  }
 }
 
 module.exports = { createApp };
