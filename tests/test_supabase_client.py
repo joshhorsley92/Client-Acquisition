@@ -1,191 +1,162 @@
+# tests/test_supabase_client.py
 import pytest
-from unittest.mock import MagicMock, patch, call
+import os
+import tempfile
+from database.supabase_client import Database
+from database.migrate import run_migration
 
 
 @pytest.fixture
-def mock_supabase():
-    with patch("database.supabase_client.create_client") as mock_create:
-        mock_client = MagicMock()
-        mock_create.return_value = mock_client
-        yield mock_client
+def db():
+    """Create an in-memory SQLite database with acq_* tables for testing."""
+    database = Database(":memory:")
+    run_migration(database)
+    yield database
+    database.close()
 
 
-@pytest.fixture
-def db(mock_supabase):
-    from database.supabase_client import SupabaseDB
-    return SupabaseDB("https://test.supabase.co", "test-key")
-
-
-def test_get_client_returns_instance(db, mock_supabase):
-    assert db.client is mock_supabase
-
-
-def test_upsert_lead_new(db, mock_supabase):
+def test_upsert_lead_new(db):
     lead = {
         "business_name": "Test Shop",
         "platform_source": "etsy",
         "platform_url": "https://etsy.com/shop/test",
         "industry": "e-commerce",
         "review_count": 150,
-        "status": "new",
     }
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.upsert.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[lead])
+    result = db.upsert_lead(lead)
 
-    db.upsert_lead(lead)
+    assert result["business_name"] == "Test Shop"
+    assert result["status"] == "new"
+    assert result["id"] is not None
 
-    mock_supabase.table.assert_called_with("acq_leads")
-    mock_table.upsert.assert_called_once()
-    call_args = mock_table.upsert.call_args
-    assert call_args[1].get("on_conflict") == "platform_source,platform_url"
+    # Verify it's in the database
+    fetched = db.get_leads_by_status("new")
+    assert len(fetched) == 1
+    assert fetched[0]["business_name"] == "Test Shop"
 
 
-def test_insert_contact(db, mock_supabase):
-    contact = {
-        "lead_id": "some-uuid",
+def test_upsert_lead_deduplicates(db):
+    lead1 = {
+        "business_name": "Test Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+        "review_count": 100,
+    }
+    lead2 = {
+        "business_name": "Test Shop Updated",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+        "review_count": 200,
+    }
+    db.upsert_lead(lead1)
+    db.upsert_lead(lead2)
+
+    leads = db.get_leads_by_status("new")
+    assert len(leads) == 1
+    assert leads[0]["business_name"] == "Test Shop Updated"
+    assert leads[0]["review_count"] == 200
+
+
+def test_insert_contact(db):
+    lead = db.upsert_lead({
+        "business_name": "Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+    })
+    contact = db.insert_contact({
+        "lead_id": lead["id"],
         "name": "Jane Doe",
         "role": "Owner",
         "email": "jane@test.com",
         "source": "website",
-    }
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.insert.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[contact])
+    })
+    assert contact["name"] == "Jane Doe"
 
-    db.insert_contact(contact)
-
-    mock_supabase.table.assert_called_with("acq_lead_contacts")
-    mock_table.insert.assert_called_once()
+    contacts = db.get_contacts_for_lead(lead["id"])
+    assert len(contacts) == 1
+    assert contacts[0]["email"] == "jane@test.com"
 
 
-def test_insert_marketing_signals(db, mock_supabase):
+def test_upsert_marketing_signals(db):
+    lead = db.upsert_lead({
+        "business_name": "Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+    })
     signals = {
-        "lead_id": "some-uuid",
+        "lead_id": lead["id"],
         "has_website": True,
         "has_social_media": False,
+        "social_platforms": ["instagram", "facebook"],
         "website_quality": "basic",
         "has_seo": False,
         "has_paid_ads": False,
     }
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.upsert.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[signals])
-
     db.upsert_marketing_signals(signals)
 
-    mock_supabase.table.assert_called_with("acq_marketing_signals")
+    result = db.get_signals_for_lead(lead["id"])
+    assert result["has_website"] == 1  # SQLite stores booleans as integers
+    assert result["website_quality"] == "basic"
+    assert result["social_platforms"] == ["instagram", "facebook"]
 
 
-def test_log_outreach(db, mock_supabase):
-    log = {
-        "lead_id": "some-uuid",
+def test_log_outreach(db):
+    lead = db.upsert_lead({
+        "business_name": "Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+    })
+    log = db.log_outreach({
+        "lead_id": lead["id"],
         "type": "mailer",
         "utm_code": "acq_123",
         "qr_url": "https://turnkey.com/start?utm_content=123",
-    }
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.insert.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[log])
-
-    db.log_outreach(log)
-
-    mock_supabase.table.assert_called_with("acq_outreach_log")
-    mock_table.insert.assert_called_once()
+    })
+    assert log["type"] == "mailer"
 
 
-def test_get_leads_by_status(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.select.return_value = mock_table
-    mock_table.eq.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[
-        {"business_name": "Shop A", "status": "new"},
-        {"business_name": "Shop B", "status": "new"},
-    ])
+def test_get_leads_by_status(db):
+    db.upsert_lead({"business_name": "A", "platform_source": "etsy", "platform_url": "url1"})
+    db.upsert_lead({"business_name": "B", "platform_source": "etsy", "platform_url": "url2"})
 
     results = db.get_leads_by_status("new")
-
     assert len(results) == 2
-    mock_table.eq.assert_called_with("status", "new")
 
 
-def test_update_lead_status(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.update.return_value = mock_table
-    mock_table.eq.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[{}])
+def test_update_lead_status(db):
+    lead = db.upsert_lead({
+        "business_name": "Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+    })
+    db.update_lead_status(lead["id"], "enriched")
 
-    db.update_lead_status("some-uuid", "enriched")
-
-    mock_table.update.assert_called_once()
-    update_data = mock_table.update.call_args[0][0]
-    assert update_data["status"] == "enriched"
-    assert "updated_at" in update_data
+    result = db.get_lead_by_id(lead["id"])
+    assert result["status"] == "enriched"
 
 
-def test_get_lead_by_id(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.select.return_value = mock_table
-    mock_table.eq.return_value = mock_table
-    mock_table.single.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data={"id": "some-uuid", "business_name": "Test"})
-
-    result = db.get_lead_by_id("some-uuid")
-
+def test_get_lead_by_id(db):
+    lead = db.upsert_lead({
+        "business_name": "Test",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/test",
+    })
+    result = db.get_lead_by_id(lead["id"])
     assert result["business_name"] == "Test"
 
 
-def test_get_signals_for_lead(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.select.return_value = mock_table
-    mock_table.eq.return_value = mock_table
-    mock_table.single.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data={"has_website": False})
-
-    result = db.get_signals_for_lead("some-uuid")
-
-    mock_supabase.table.assert_called_with("acq_marketing_signals")
-    assert result["has_website"] is False
-
-
-def test_get_contacts_for_lead(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.select.return_value = mock_table
-    mock_table.eq.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[
-        {"name": "Jane", "email": "jane@test.com"}
-    ])
-
-    result = db.get_contacts_for_lead("some-uuid")
-
-    assert len(result) == 1
-
-
-def test_get_stats(db, mock_supabase):
-    mock_table = MagicMock()
-    mock_supabase.table.return_value = mock_table
-    mock_table.select.return_value = mock_table
-    mock_table.execute.return_value = MagicMock(data=[
-        {"status": "new"}, {"status": "new"}, {"status": "enriched"}
-    ])
+def test_get_stats(db):
+    db.upsert_lead({"business_name": "A", "platform_source": "etsy", "platform_url": "url1"})
+    db.upsert_lead({"business_name": "B", "platform_source": "etsy", "platform_url": "url2"})
+    lead = db.upsert_lead({"business_name": "C", "platform_source": "etsy", "platform_url": "url3"})
+    db.update_lead_status(lead["id"], "enriched")
 
     stats = db.get_stats()
-
     assert stats["new"] == 2
     assert stats["enriched"] == 1
 
 
 def test_no_delete_methods_exist(db):
-    """Verify the DB wrapper never exposes a delete method."""
     public_methods = [m for m in dir(db) if not m.startswith("_")]
     for method in public_methods:
         assert "delete" not in method.lower()

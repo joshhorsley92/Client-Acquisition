@@ -1,3 +1,4 @@
+# config.py
 import os
 from dotenv import load_dotenv
 
@@ -45,17 +46,10 @@ SCRAPER_DEFAULTS = {
 
 
 def load_config():
-    required_vars = ["SUPABASE_URL", "SUPABASE_KEY", "TKBS_BASE_URL"]
     config = {}
-
-    for var in required_vars:
-        value = os.getenv(var)
-        if not value:
-            raise ValueError(
-                f"Missing required environment variable: {var}. "
-                f"Copy .env.example to .env and fill in the values."
-            )
-        config[var.lower()] = value
-
+    config["db_path"] = os.getenv("DB_PATH", os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "tkbs-crm", "tkbs-crm.db"
+    ))
+    config["tkbs_base_url"] = os.getenv("TKBS_BASE_URL", "https://turnkeymarketing.com/start")
     config["selenium_driver_path"] = os.getenv("SELENIUM_DRIVER_PATH", "")
     return config
