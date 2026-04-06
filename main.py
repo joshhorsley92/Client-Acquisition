@@ -8,6 +8,7 @@ from scrapers.county_registry import CountyRegistryScraper
 from enrichment.pipeline import EnrichmentPipeline
 from outreach.generator import OutreachGenerator
 from database.migrate import run_migration
+from database.crm_bridge import push_leads_to_crm
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -106,6 +107,27 @@ def stats():
         click.echo(f"  {status}: {count}")
         total += count
     click.echo(f"\n  Total: {total}")
+
+
+@cli.command()
+@click.option("--lead-id", multiple=True, help="Specific lead IDs to push (can specify multiple)")
+@click.option("--owner-id", default=1, type=int, help="CRM user ID to assign deals to")
+def push(lead_id, owner_id):
+    """Push enriched leads into the CRM pipeline."""
+    db = get_db()
+    lead_ids = list(lead_id) if lead_id else None
+
+    if lead_ids:
+        click.echo(f"Pushing {len(lead_ids)} specific leads to CRM...")
+    else:
+        click.echo("Pushing all enriched leads to CRM...")
+
+    results = push_leads_to_crm(db, lead_ids=lead_ids, owner_id=owner_id)
+
+    click.echo(f"\nResults:")
+    click.echo(f"  Pushed: {results['pushed']}")
+    click.echo(f"  Skipped: {results['skipped']}")
+    click.echo(f"  Errors: {results['errors']}")
 
 
 @cli.command()
