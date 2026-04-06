@@ -109,3 +109,126 @@ class EtsyScraper:
             lead = self.build_lead_dict(shop)
             self.db.upsert_lead(lead)
             logger.info(f"Upserted lead: {shop['business_name']}")
+
+    def parse_search_page_real(self, html: str) -> list[dict]:
+        """Parse real Etsy search results page.
+
+        Real Etsy pages use JavaScript rendering and complex class names.
+        We look for JSON-LD structured data and data attributes.
+        Falls back to fixture-format parsing if JSON-LD not found.
+        """
+        import json
+        soup = BeautifulSoup(html, "html.parser")
+        shops = []
+
+        # Strategy 1: Look for JSON-LD structured data
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict) and data.get("@type") == "ItemList":
+                    for item in data.get("itemListElement", []):
+                        offer = item.get("item", {})
+                        if offer.get("@type") in ("Product", "ListItem"):
+                            name = offer.get("name", "")
+                            url = offer.get("url", "")
+                            rating_data = offer.get("aggregateRating", {})
+                            review_count = int(rating_data.get("reviewCount", 0))
+                            rating = float(rating_data.get("ratingValue", 0))
+                            if review_count >= self.min_reviews:
+                                shops.append({
+                                    "business_name": name,
+                                    "shop_url": url,
+                                    "review_count": review_count,
+                                    "rating": rating,
+                                })
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
+        # Strategy 2: Look for data attributes on listing cards
+        if not shops:
+            for card in soup.select("[data-listing-id]"):
+                name_el = card.select_one("h3, .v2-listing-card__title, [class*='title']")
+                if not name_el:
+                    continue
+                name = name_el.get_text(strip=True)
+                link = card.select_one("a[href*='/listing/']")
+                url = link.get("href", "") if link else ""
+                shops.append({
+                    "business_name": name,
+                    "shop_url": url,
+                    "review_count": 0,  # May need detail page for count
+                    "rating": None,
+                })
+
+        # Strategy 3: Fall back to fixture-format parsing
+        if not shops:
+            shops = self.parse_search_page(html)
+
+        return shops
+
+    def parse_shop_page_real(self, html: str) -> dict:
+        """Parse real Etsy shop/about page for owner info, website, socials."""
+        import json
+        soup = BeautifulSoup(html, "html.parser")
+        details = {"website_url": None, "social_links": [], "owner_name": None}
+
+        # Look for JSON-LD
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict):
+                    if data.get("url"):
+                        details["website_url"] = data.get("url")
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        # Look for external links (common pattern on About pages)
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            # External links that aren't Etsy
+            if href.startswith("http") and "etsy.com" not in href:
+                lower = href.lower()
+                if any(s in lower for s in ["instagram.com", "facebook.com", "twitter.com", "tiktok.com", "pinterest.com"]):
+                    details["social_links"].append(href)
+                elif not details["website_url"] and not any(s in lower for s in ["google.com", "youtube.com", "amazon.com"]):
+                    details["website_url"] = href
+
+        # Fall back to fixture-format parsing
+        if not details["website_url"] and not details["social_links"]:
+            fixture_details = self.parse_shop_page(html)
+            details.update({k: v for k, v in fixture_details.items() if v})
+
+        return details
+
+    def scrape_real(self, max_pages: int = 3, categories: list[str] | None = None):
+        """Scrape Etsy using browser-based fetching for real pages."""
+        from scrapers.browser import fetch_with_browser
+
+        if not categories:
+            categories = ["handmade", "vintage", "craft_supplies"]
+
+        logger.info("Starting real Etsy scrape with browser...")
+
+        for category in categories:
+            url = f"https://www.etsy.com/c/{category}?explicit=1&order=most_relevant"
+            logger.info(f"Scraping category: {category}")
+
+            html = fetch_with_browser(url)
+            if not html:
+                logger.warning(f"Failed to fetch Etsy category: {category}")
+                continue
+
+            shops = self.parse_search_page_real(html)
+            logger.info(f"Found {len(shops)} items in {category}")
+
+            for shop in shops:
+                self._rate_limit()
+                if shop.get("shop_url"):
+                    detail_html = fetch_with_browser(shop["shop_url"])
+                    if detail_html:
+                        details = self.parse_shop_page_real(detail_html)
+                        shop.update(details)
+
+                lead = self.build_lead_dict(shop)
+                self.db.upsert_lead(lead)
+                logger.info(f"Upserted lead: {shop.get('business_name', 'Unknown')}")

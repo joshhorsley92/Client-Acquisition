@@ -108,3 +108,84 @@ class CountyRegistryScraper:
                 self.db.upsert_lead(lead)
                 logger.info(f"Upserted lead: {biz['business_name']}")
             self._rate_limit()
+
+    def parse_search_page_real(self, html: str) -> list[dict]:
+        """Parse real Michigan LARA search results."""
+        soup = BeautifulSoup(html, "html.parser")
+        businesses = []
+
+        # Strategy 1: Look for table-based results (common in government sites)
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            for row in rows[1:]:  # Skip header row
+                cells = row.find_all("td")
+                if len(cells) >= 3:
+                    name = cells[0].get_text(strip=True)
+                    biz_type = ""
+                    agent = ""
+                    address = ""
+                    filing_date = ""
+
+                    for i, cell in enumerate(cells):
+                        text = cell.get_text(strip=True).lower()
+                        if i == 0:
+                            name = cell.get_text(strip=True)
+                        elif "llc" in text or "inc" in text or "corp" in text:
+                            pass  # Part of name usually
+                        elif any(t in text for t in ["active", "inactive", "dissolved"]):
+                            pass  # Status
+
+                    if name and not name.lower().startswith("entity"):
+                        businesses.append({
+                            "business_name": name,
+                            "registered_agent": agent or None,
+                            "address": address or None,
+                            "filing_date": filing_date or None,
+                            "business_type": biz_type or "Unknown",
+                        })
+
+        # Strategy 2: Look for div-based card layout
+        if not businesses:
+            for card in soup.select("[class*='result'], [class*='entity'], [class*='business']"):
+                name_el = card.select_one("[class*='name'], h3, h4, a")
+                if name_el:
+                    businesses.append({
+                        "business_name": name_el.get_text(strip=True),
+                        "registered_agent": None,
+                        "address": None,
+                        "filing_date": None,
+                        "business_type": "Unknown",
+                    })
+
+        # Strategy 3: Fall back to fixture format
+        if not businesses:
+            businesses = self.parse_search_page(html)
+
+        return businesses
+
+    def scrape_real(self):
+        """Scrape Michigan LARA business registry using browser."""
+        from scrapers.browser import fetch_with_browser
+
+        logger.info("Starting real Michigan LARA scrape with browser...")
+        base_url = "https://mibusinessregistry.lara.state.mi.us/search/business"
+
+        html = fetch_with_browser(base_url, wait_seconds=5)
+        if not html:
+            logger.error("Failed to fetch Michigan LARA search page")
+            return
+
+        # Log what we see so we can refine selectors
+        soup = BeautifulSoup(html, "html.parser")
+        forms = soup.find_all("form")
+        logger.info(f"Found {len(forms)} forms on LARA page")
+        for form in forms:
+            logger.info(f"Form action: {form.get('action')}, method: {form.get('method')}")
+            inputs = form.find_all("input")
+            for inp in inputs:
+                logger.info(f"  Input: name={inp.get('name')}, type={inp.get('type')}")
+
+        logger.info(
+            "LARA scraping requires manual inspection of the live site to determine form parameters. "
+            "Run with --debug to see form structure, then update scraper accordingly."
+        )

@@ -26,7 +26,8 @@ def cli():
 
 @cli.command()
 @click.argument("source", type=click.Choice(["etsy", "kickstarter", "county", "all"]))
-def scrape(source):
+@click.option("--real", is_flag=True, help="Use browser-based scraping for real sites (requires Chrome)")
+def scrape(source, real):
     """Scrape leads from a source (etsy, kickstarter, county, or all)."""
     db = get_db()
     scrapers = {
@@ -34,13 +35,17 @@ def scrape(source):
         "kickstarter": lambda: KickstarterScraper(db=db),
         "county": lambda: CountyRegistryScraper(db=db),
     }
+    method = "scrape_real" if real else "scrape"
+
     if source == "all":
         for name, factory in scrapers.items():
-            click.echo(f"Scraping {name}...")
-            factory().scrape()
+            click.echo(f"Scraping {name}{'(real)' if real else ''}...")
+            scraper = factory()
+            getattr(scraper, method)()
     else:
-        click.echo(f"Scraping {source}...")
-        scrapers[source]().scrape()
+        click.echo(f"Scraping {source}{'(real)' if real else ''}...")
+        scraper = scrapers[source]()
+        getattr(scraper, method)()
     click.echo("Scraping complete.")
 
 
