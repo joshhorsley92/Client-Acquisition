@@ -48,7 +48,7 @@ SCRAPER_DEFAULTS = {
 def load_config():
     config = {}
     config["db_path"] = os.getenv("DB_PATH", os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "tkbs-crm", "tkbs-crm.db"
+        os.path.dirname(os.path.abspath(__file__)), "tkbs-crm", "tkbs-crm.db"
     ))
     config["tkbs_base_url"] = os.getenv("TKBS_BASE_URL", "https://turnkeymarketing.com/start")
     config["selenium_driver_path"] = os.getenv("SELENIUM_DRIVER_PATH", "")

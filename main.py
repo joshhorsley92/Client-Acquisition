@@ -27,7 +27,8 @@ def cli():
 @cli.command()
 @click.argument("source", type=click.Choice(["etsy", "kickstarter", "county", "all"]))
 @click.option("--real", is_flag=True, help="Use browser-based scraping for real sites (requires Chrome)")
-def scrape(source, real):
+@click.option("--visible", is_flag=True, help="Show browser window (for solving CAPTCHAs manually)")
+def scrape(source, real, visible):
     """Scrape leads from a source (etsy, kickstarter, county, or all)."""
     db = get_db()
     scrapers = {
@@ -35,17 +36,25 @@ def scrape(source, real):
         "kickstarter": lambda: KickstarterScraper(db=db),
         "county": lambda: CountyRegistryScraper(db=db),
     }
-    method = "scrape_real" if real else "scrape"
 
-    if source == "all":
-        for name, factory in scrapers.items():
-            click.echo(f"Scraping {name}{'(real)' if real else ''}...")
-            scraper = factory()
-            getattr(scraper, method)()
+    if real:
+        headless = not visible
+        if source == "all":
+            for name, factory in scrapers.items():
+                click.echo(f"Scraping {name} (real, {'headless' if headless else 'visible'})...")
+                factory().scrape_real(headless=headless)
+        else:
+            click.echo(f"Scraping {source} (real, {'headless' if headless else 'visible'})...")
+            scrapers[source]().scrape_real(headless=headless)
     else:
-        click.echo(f"Scraping {source}{'(real)' if real else ''}...")
-        scraper = scrapers[source]()
-        getattr(scraper, method)()
+        if source == "all":
+            for name, factory in scrapers.items():
+                click.echo(f"Scraping {name}...")
+                factory().scrape()
+        else:
+            click.echo(f"Scraping {source}...")
+            scrapers[source]().scrape()
+
     click.echo("Scraping complete.")
 
 

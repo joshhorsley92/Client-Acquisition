@@ -99,64 +99,40 @@ class KickstarterScraper:
             logger.info(f"Upserted lead: {project['business_name']}")
 
     def parse_search_page_real(self, html: str) -> list[dict]:
-        """Parse real Kickstarter discovery page."""
+        """Parse real Kickstarter discovery page.
+
+        Kickstarter embeds full project JSON in data-project attributes
+        on card elements, including name, backers_count, creator, URLs.
+        """
         import json
         soup = BeautifulSoup(html, "html.parser")
         projects = []
 
-        # Strategy 1: Look for data in script tags (React initial state)
-        for script in soup.find_all("script"):
-            text = script.string or ""
-            if "window.__PRELOADED_STATE__" in text or "initial_state" in text.lower():
-                try:
-                    # Extract JSON from assignment
-                    start = text.index("{")
-                    end = text.rindex("}") + 1
-                    data = json.loads(text[start:end])
-                    # Navigate to project list
-                    project_list = (
-                        data.get("discover", {}).get("projects", []) or
-                        data.get("projects", []) or
-                        data.get("data", {}).get("projects", [])
-                    )
-                    for proj in project_list:
-                        backer_count = proj.get("backers_count", 0)
-                        if backer_count >= self.min_reviews:
-                            projects.append({
-                                "business_name": proj.get("name", ""),
-                                "project_url": proj.get("urls", {}).get("web", {}).get("project", "")
-                                    or f"https://www.kickstarter.com/projects/{proj.get('creator', {}).get('slug', '')}/{proj.get('slug', '')}",
-                                "review_count": backer_count,
-                            })
-                except (json.JSONDecodeError, ValueError, TypeError):
+        # Strategy 1: Parse JSON from data-project attributes (most reliable)
+        for card in soup.select("[data-project]"):
+            try:
+                data = json.loads(card.get("data-project", "{}"))
+                backer_count = data.get("backers_count", 0)
+                if backer_count < self.min_reviews:
                     continue
 
-        # Strategy 2: Look for project card data attributes
-        if not projects:
-            for card in soup.select("[data-project], [class*='project-card']"):
-                name_el = card.select_one("h3, h2, [class*='project-title'], [class*='name']")
-                backer_el = card.select_one("[class*='backer'], [class*='supporter']")
-                if not name_el:
-                    continue
-                name = name_el.get_text(strip=True)
-                link = card.select_one("a[href*='/projects/']")
-                url = link.get("href", "") if link else ""
-                if url and not url.startswith("http"):
-                    url = f"https://www.kickstarter.com{url}"
+                project_url = (
+                    data.get("urls", {}).get("web", {}).get("project", "")
+                    or f"https://www.kickstarter.com/projects/{data.get('slug', '')}"
+                )
+                creator = data.get("creator", {})
+                creator_name = creator.get("name") if isinstance(creator, dict) else str(creator)
 
-                backer_count = 0
-                if backer_el:
-                    backer_text = backer_el.get_text(strip=True)
-                    backer_count = int(re.sub(r"[^\d]", "", backer_text) or 0)
+                projects.append({
+                    "business_name": data.get("name", ""),
+                    "project_url": project_url,
+                    "review_count": backer_count,
+                    "creator_name": creator_name,
+                })
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
 
-                if backer_count >= self.min_reviews:
-                    projects.append({
-                        "business_name": name,
-                        "project_url": url,
-                        "review_count": backer_count,
-                    })
-
-        # Strategy 3: Fall back to fixture format
+        # Strategy 2: Fall back to fixture format
         if not projects:
             projects = self.parse_search_page(html)
 
@@ -201,35 +177,55 @@ class KickstarterScraper:
 
         return details
 
-    def scrape_real(self, max_pages: int = 3, categories: list[str] | None = None):
-        """Scrape Kickstarter using browser-based fetching."""
-        from scrapers.browser import fetch_with_browser
+    def scrape_real(self, max_pages: int = 3, categories: list[str] | None = None, headless: bool = True):
+        """Scrape Kickstarter using browser-based fetching.
+
+        The discover page embeds full project JSON in data-project attributes,
+        so we can get name, backers, creator, and URL from the search page alone
+        without visiting each project's detail page.
+        """
+        from scrapers.browser import BrowserSession
+        import time as _time
 
         if not categories:
             categories = ["design", "technology", "fashion"]
 
         logger.info("Starting real Kickstarter scrape with browser...")
 
-        for category in categories:
-            url = f"https://www.kickstarter.com/discover/advanced?category_id={category}&sort=popularity"
-            logger.info(f"Scraping category: {category}")
+        with BrowserSession(headless=headless) as browser:
+            for category in categories:
+                url = f"https://www.kickstarter.com/discover/advanced?category_id={category}&sort=popularity"
+                logger.info(f"Scraping category: {category}")
 
-            html = fetch_with_browser(url, wait_seconds=8)
-            if not html:
-                logger.warning(f"Failed to fetch Kickstarter category: {category}")
-                continue
+                # Longer wait between categories to avoid triggering CAPTCHAs
+                html = browser.fetch(url, wait_seconds=10)
+                if not html:
+                    logger.warning(f"Failed to fetch Kickstarter category: {category}")
+                    continue
 
-            projects = self.parse_search_page_real(html)
-            logger.info(f"Found {len(projects)} projects in {category}")
+                # Check for CAPTCHA
+                if "recaptcha" in html.lower() or "challenge" in html.lower():
+                    if not headless:
+                        logger.info("CAPTCHA detected. Please solve it in the browser window...")
+                        for _ in range(60):
+                            _time.sleep(2)
+                            html = browser.driver.page_source
+                            if "recaptcha" not in html.lower():
+                                logger.info("CAPTCHA solved!")
+                                break
 
-            for project in projects:
-                self._rate_limit()
-                if project.get("project_url"):
-                    detail_html = fetch_with_browser(project["project_url"])
-                    if detail_html:
-                        details = self.parse_project_page_real(detail_html)
-                        project.update(details)
+                projects = self.parse_search_page_real(html)
+                logger.info(f"Found {len(projects)} projects in {category}")
 
-                lead = self.build_lead_dict(project)
-                self.db.upsert_lead(lead)
-                logger.info(f"Upserted lead: {project.get('business_name', 'Unknown')}")
+                # The discover page already has all the data we need (name, backers, creator, URL)
+                # No need to visit each project page — saves time and avoids CAPTCHA triggers
+                for project in projects:
+                    lead = self.build_lead_dict(project)
+                    self.db.upsert_lead(lead)
+                    logger.info(f"Upserted lead: {project.get('business_name', 'Unknown')} ({project.get('review_count', 0)} backers)")
+
+                # Wait between categories to be respectful
+                if category != categories[-1]:
+                    delay = random.uniform(8, 15)
+                    logger.info(f"Waiting {delay:.0f}s before next category...")
+                    _time.sleep(delay)

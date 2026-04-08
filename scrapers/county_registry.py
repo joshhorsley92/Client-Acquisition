@@ -163,29 +163,53 @@ class CountyRegistryScraper:
 
         return businesses
 
-    def scrape_real(self):
-        """Scrape Michigan LARA business registry using browser."""
-        from scrapers.browser import fetch_with_browser
+    def scrape_real(self, headless: bool = True):
+        """Scrape Michigan LARA business registry using browser.
+
+        In visible mode, you can solve the Cloudflare CAPTCHA manually,
+        then the scraper will parse the results.
+        """
+        from scrapers.browser import BrowserSession
+        import time as _time
 
         logger.info("Starting real Michigan LARA scrape with browser...")
         base_url = "https://mibusinessregistry.lara.state.mi.us/search/business"
 
-        html = fetch_with_browser(base_url, wait_seconds=5)
-        if not html:
-            logger.error("Failed to fetch Michigan LARA search page")
-            return
+        with BrowserSession(headless=headless) as browser:
+            html = browser.fetch(base_url, wait_seconds=5)
+            if not html:
+                logger.error("Failed to fetch Michigan LARA search page")
+                return
 
-        # Log what we see so we can refine selectors
-        soup = BeautifulSoup(html, "html.parser")
-        forms = soup.find_all("form")
-        logger.info(f"Found {len(forms)} forms on LARA page")
-        for form in forms:
-            logger.info(f"Form action: {form.get('action')}, method: {form.get('method')}")
-            inputs = form.find_all("input")
-            for inp in inputs:
-                logger.info(f"  Input: name={inp.get('name')}, type={inp.get('type')}")
+            # Check if we hit Cloudflare
+            if "Just a moment" in html or "cf-turnstile" in html:
+                if headless:
+                    logger.error("LARA has Cloudflare protection. Run with --visible to solve CAPTCHA manually.")
+                    return
+                else:
+                    logger.info("Cloudflare detected. Please solve the CAPTCHA in the browser window...")
+                    # Wait for user to solve CAPTCHA (poll for page change)
+                    for _ in range(60):  # Wait up to 60 seconds
+                        _time.sleep(2)
+                        html = browser.driver.page_source
+                        if "Just a moment" not in html and "cf-turnstile" not in html:
+                            logger.info("CAPTCHA solved! Continuing...")
+                            break
+                    else:
+                        logger.error("CAPTCHA not solved in time.")
+                        return
 
-        logger.info(
-            "LARA scraping requires manual inspection of the live site to determine form parameters. "
-            "Run with --debug to see form structure, then update scraper accordingly."
-        )
+            # Log the page structure for debugging
+            soup = BeautifulSoup(html, "html.parser")
+            title = soup.find("title")
+            logger.info(f"Page title: {title.get_text(strip=True) if title else 'no title'}")
+
+            inputs = soup.find_all("input")
+            logger.info(f"Found {len(inputs)} input elements")
+            for inp in inputs[:10]:
+                logger.info(f"  Input: name={inp.get('name')} type={inp.get('type')} placeholder={inp.get('placeholder', '')}")
+
+            logger.info(
+                "LARA portal loaded. To complete scraping, the search form parameters need to be "
+                "identified from the live page. Use --visible mode to interact with the form manually."
+            )
