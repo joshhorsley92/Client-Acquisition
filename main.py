@@ -8,7 +8,8 @@ from scrapers.county_registry import CountyRegistryScraper
 from enrichment.pipeline import EnrichmentPipeline
 from outreach.generator import OutreachGenerator
 from database.migrate import run_migration
-from database.crm_bridge import push_leads_to_crm
+from database.crm_bridge import push_leads_to_crm, find_deal_for_lead
+from outreach.email_sender import EmailSender
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -77,7 +78,8 @@ def enrich(lead_id):
 @click.option("--status", default=None, help="Generate for all leads with this status")
 @click.option("--lead-id", default=None, help="Generate for a specific lead")
 @click.option("--format", "fmt", default="both", type=click.Choice(["mailer", "email", "both"]))
-def generate(status, lead_id, fmt):
+@click.option("--send", is_flag=True, help="Send emails via Gmail (requires GMAIL_SENDER and GMAIL_APP_PASSWORD in .env)")
+def generate(status, lead_id, fmt, send):
     """Generate personalized outreach documents."""
     db = get_db()
     config = load_config()
@@ -95,6 +97,48 @@ def generate(status, lead_id, fmt):
             click.echo(f"  {lead.get('business_name', lead['id'])}: {list(results.keys())}")
     else:
         click.echo("Specify --status or --lead-id")
+
+    if send and fmt in ("both", "email"):
+        sender = EmailSender(db=db, config=config)
+        if not sender.can_send():
+            click.echo("  Note: No Gmail credentials configured. Emails stored as drafts in CRM.")
+
+        # Build list of lead IDs to process
+        lead_list = []
+        if lead_id:
+            lead_list = [lead_id]
+        elif status:
+            lead_list = [l["id"] for l in db.get_leads_by_status(status)]
+
+        for lid in lead_list:
+            deal_id = find_deal_for_lead(db, lid)
+            if not deal_id:
+                click.echo(f"  Skipping send for {lid}: no CRM deal found")
+                continue
+
+            lead_data = db.get_lead_by_id(lid)
+            contacts = db.get_contacts_for_lead(lid)
+            contact = contacts[0] if contacts else None
+            to_email = contact.get("email") if contact else None
+
+            if not to_email:
+                click.echo(f"  Skipping send for {lead_data.get('business_name', lid)}: no contact email")
+                continue
+
+            signals = db.get_signals_for_lead(lid) or {}
+            gen_tmp = OutreachGenerator(db=db, base_url=config["tkbs_base_url"])
+            email_html = gen_tmp.generate_email(lead_data, contact, signals)
+            subject = f"We noticed {lead_data.get('business_name', 'your business')}"
+
+            contact_id_crm = db.conn.execute(
+                "SELECT id FROM contacts WHERE email = ?", (to_email,)
+            ).fetchone()
+            contact_id_val = (contact_id_crm[0] if isinstance(contact_id_crm, tuple) else contact_id_crm["id"]) if contact_id_crm else None
+
+            result = sender.prepare_and_send(deal_id, contact_id_val, to_email, subject, email_html)
+            status_text = "Sent" if result["sent"] else "Stored as draft"
+            click.echo(f"  {lead_data.get('business_name', lid)}: {status_text}")
+
     click.echo("Generation complete.")
 
 
