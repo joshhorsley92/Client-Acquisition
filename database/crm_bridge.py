@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,66 @@ CREATE TABLE IF NOT EXISTS deals (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    due_at TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'done', 'overdue')),
+    auto_generated INTEGER NOT NULL DEFAULT 0,
+    template_key TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stage_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stage TEXT NOT NULL,
+    action_type TEXT NOT NULL CHECK(action_type IN ('create_tasks', 'start_cadence', 'trigger_skill', 'record')),
+    config TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS activities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    type TEXT NOT NULL CHECK(type IN ('email', 'call', 'meeting', 'note', 'stage_change', 'system')),
+    content TEXT,
+    metadata TEXT DEFAULT '{}',
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK(type IN ('analysis_deck', 'proposal', 'other')),
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    generated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS email_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+    contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('outbound', 'inbound')),
+    subject TEXT,
+    body_text TEXT,
+    body_html TEXT,
+    from_email TEXT,
+    to_email TEXT,
+    sent_at TEXT,
+    opened_at TEXT,
+    clicked_at TEXT,
+    tracking_pixel_id TEXT UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -81,6 +141,66 @@ def _build_research_findings(signals: dict | None) -> str | None:
         findings.append("No paid advertising detected")
 
     return "\n".join(findings)
+
+
+def log_activity(db, deal_id: int, contact_id: int | None, activity_type: str, content: str, metadata: dict | None = None):
+    """Log an activity on a CRM deal."""
+    import json
+    db.conn.execute(
+        """INSERT INTO activities (deal_id, contact_id, type, content, metadata)
+        VALUES (?, ?, ?, ?, ?)""",
+        (deal_id, contact_id, activity_type, content, json.dumps(metadata or {}))
+    )
+
+
+def _execute_stage_actions(db, deal_id: int, stage: str) -> dict:
+    """Execute stage actions for a deal, replicating CRM stage-actions.js logic.
+
+    Handles 'create_tasks' and 'start_cadence' action types.
+    Skips 'trigger_skill' and 'record' (require Node.js).
+    """
+    import json
+
+    result = {"tasks_created": 0}
+
+    actions = db.conn.execute(
+        "SELECT * FROM stage_actions WHERE stage = ? AND enabled = 1 ORDER BY sort_order ASC",
+        (stage,)
+    ).fetchall()
+
+    for action in actions:
+        action_dict = dict(action) if hasattr(action, 'keys') else {"action_type": action[2], "config": action[3]}
+        action_type = action_dict.get("action_type", "")
+        try:
+            config = json.loads(action_dict.get("config", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if action_type == "create_tasks":
+            for task in config.get("tasks", []):
+                offset_days = task.get("due_offset_days", 0)
+                due_at = (datetime.now() + timedelta(days=offset_days)).strftime("%Y-%m-%dT%H:%M:%S")
+                db.conn.execute(
+                    """INSERT INTO tasks (deal_id, description, due_at, auto_generated, template_key)
+                    VALUES (?, ?, ?, 1, ?)""",
+                    (deal_id, task["description"], due_at, task.get("template"))
+                )
+                result["tasks_created"] += 1
+
+        elif action_type == "start_cadence":
+            for reminder in config.get("reminders", []):
+                day = reminder.get("day", 1)
+                due_at = (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%dT%H:%M:%S")
+                template = reminder.get("template", "")
+                description = f"Follow-up reminder (day {day})"
+                db.conn.execute(
+                    """INSERT INTO tasks (deal_id, description, due_at, auto_generated, template_key)
+                    VALUES (?, ?, ?, 1, ?)""",
+                    (deal_id, description, due_at, template)
+                )
+                result["tasks_created"] += 1
+
+    return result
 
 
 def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
@@ -199,12 +319,24 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
             source = "cold"  # Scraped leads are cold outreach
             source_detail = f"Scraped from {lead.get('platform_source', 'unknown')} — {lead.get('review_count', 0)} reviews"
 
-            db.conn.execute(
+            cursor = db.conn.execute(
                 """INSERT INTO deals (contact_id, company_id, stage, source, source_detail,
                     research_findings, owner_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (contact_id, company_id, "lead", source, source_detail, research_findings, owner_id)
             )
+            deal_id = cursor.lastrowid
+
+            # Execute stage actions (auto-create tasks)
+            try:
+                _execute_stage_actions(db, deal_id, "lead")
+            except Exception as e:
+                logger.warning(f"Stage actions failed for deal {deal_id}: {e}")
+
+            # Log deal creation activity
+            log_activity(db, deal_id, contact_id, "stage_change",
+                        "Deal created from lead acquisition tool",
+                        {"from": None, "to": "lead"})
 
             db.conn.commit()
 

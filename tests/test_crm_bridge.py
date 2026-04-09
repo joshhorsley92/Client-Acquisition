@@ -1,7 +1,7 @@
 import pytest
 from database.supabase_client import Database
 from database.migrate import run_migration
-from database.crm_bridge import push_leads_to_crm, CRM_TABLES_SQL, _build_research_findings
+from database.crm_bridge import push_leads_to_crm, CRM_TABLES_SQL, _build_research_findings, log_activity, _execute_stage_actions
 
 
 @pytest.fixture
@@ -181,3 +181,85 @@ def test_build_research_findings():
 
 def test_build_research_findings_none():
     assert _build_research_findings(None) is None
+
+
+def _seed_stage_actions(db):
+    """Insert default 'lead' stage actions matching CRM seed.sql."""
+    db.conn.execute("""
+        INSERT INTO stage_actions (stage, action_type, config, sort_order)
+        VALUES ('lead', 'create_tasks', '{"tasks":[{"description":"Research prospect","due_offset_days":0},{"description":"Send first outreach","due_offset_days":1}]}', 0)
+    """)
+    db.conn.commit()
+
+
+def test_push_creates_tasks_from_stage_actions(db):
+    _seed_stage_actions(db)
+    lead = db.upsert_lead({
+        "business_name": "Task Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/taskshop",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+
+    push_leads_to_crm(db)
+
+    tasks = db.conn.execute("SELECT * FROM tasks").fetchall()
+    assert len(tasks) == 2
+    descriptions = [dict(t)["description"] for t in tasks]
+    assert "Research prospect" in descriptions
+    assert "Send first outreach" in descriptions
+    # Verify auto_generated flag
+    for t in tasks:
+        assert dict(t)["auto_generated"] == 1
+
+
+def test_push_creates_activity_on_deal_creation(db):
+    lead = db.upsert_lead({
+        "business_name": "Activity Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/activityshop",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+
+    push_leads_to_crm(db)
+
+    activities = db.conn.execute("SELECT * FROM activities").fetchall()
+    assert len(activities) == 1
+    activity = dict(activities[0])
+    assert activity["type"] == "stage_change"
+    assert "lead acquisition" in activity["content"]
+
+
+def test_push_no_stage_actions_still_works(db):
+    lead = db.upsert_lead({
+        "business_name": "No Actions Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/noactions",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+
+    results = push_leads_to_crm(db)
+
+    assert results["pushed"] == 1
+    tasks = db.conn.execute("SELECT * FROM tasks").fetchall()
+    assert len(tasks) == 0
+
+
+def test_push_disabled_stage_action_skipped(db):
+    db.conn.execute("""
+        INSERT INTO stage_actions (stage, action_type, config, enabled, sort_order)
+        VALUES ('lead', 'create_tasks', '{"tasks":[{"description":"Should not exist","due_offset_days":0}]}', 0, 0)
+    """)
+    db.conn.commit()
+
+    lead = db.upsert_lead({
+        "business_name": "Disabled Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/disabled",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+
+    push_leads_to_crm(db)
+
+    tasks = db.conn.execute("SELECT * FROM tasks").fetchall()
+    assert len(tasks) == 0
