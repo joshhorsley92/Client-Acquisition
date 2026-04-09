@@ -153,6 +153,38 @@ def log_activity(db, deal_id: int, contact_id: int | None, activity_type: str, c
     )
 
 
+def find_deal_for_lead(db, lead_id: str) -> int | None:
+    """Find the CRM deal_id for a lead by matching business_name → company → deal."""
+    lead = db.get_lead_by_id(lead_id)
+    if not lead or not lead.get("business_name"):
+        return None
+
+    company = db.conn.execute(
+        "SELECT id FROM companies WHERE name = ?", (lead["business_name"],)
+    ).fetchone()
+    if not company:
+        return None
+
+    company_id = company[0] if isinstance(company, tuple) else company["id"]
+    deal = db.conn.execute(
+        "SELECT id FROM deals WHERE company_id = ? AND stage NOT IN ('closed_won', 'closed_lost') ORDER BY created_at DESC LIMIT 1",
+        (company_id,)
+    ).fetchone()
+    if not deal:
+        return None
+
+    return deal[0] if isinstance(deal, tuple) else deal["id"]
+
+
+def register_document(db, deal_id: int, file_path: str, file_name: str, doc_type: str = "other"):
+    """Register a generated document in the CRM documents table."""
+    db.conn.execute(
+        """INSERT INTO documents (deal_id, type, file_path, file_name, generated_at)
+        VALUES (?, ?, ?, ?, ?)""",
+        (deal_id, doc_type, file_path, file_name, datetime.now().isoformat())
+    )
+
+
 def _execute_stage_actions(db, deal_id: int, stage: str) -> dict:
     """Execute stage actions for a deal, replicating CRM stage-actions.js logic.
 
