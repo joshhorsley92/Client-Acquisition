@@ -52,4 +52,6 @@ def load_config():
     ))
     config["tkbs_base_url"] = os.getenv("TKBS_BASE_URL", "https://turnkeymarketing.com/start")
     config["selenium_driver_path"] = os.getenv("SELENIUM_DRIVER_PATH", "")
+    config["gmail_sender"] = os.getenv("GMAIL_SENDER", "")
+    config["gmail_app_password"] = os.getenv("GMAIL_APP_PASSWORD", "")
     return config

@@ -8,6 +8,7 @@ from jinja2 import Template
 from config import BRAND
 from outreach.pitch import generate_pitch_points
 from outreach.qr_generator import QRGenerator
+from database.crm_bridge import find_deal_for_lead, register_document, log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,19 @@ class OutreachGenerator:
                 "qr_url": utm_url,
                 "personalization_notes": ", ".join(generate_pitch_points(signals)[:2]),
             })
+
+        # Link to CRM deal if one exists (best-effort)
+        deal_id = find_deal_for_lead(self.db, lead_id)
+        if deal_id:
+            if "mailer" in results:
+                register_document(self.db, deal_id, results["mailer"], "mailer.docx")
+                log_activity(self.db, deal_id, None, "system",
+                            f"Outreach mailer generated: {results['mailer']}")
+            if "email" in results:
+                register_document(self.db, deal_id, results["email"], "email.html")
+                log_activity(self.db, deal_id, None, "system",
+                            f"Outreach email generated: {results['email']}")
+            self.db.conn.commit()
 
         logger.info(f"Generated {format} for lead {lead_id}")
         return results
