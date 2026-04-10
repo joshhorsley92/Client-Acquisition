@@ -42,9 +42,13 @@ if (actionCount === 0) {
 }
 
 // Seed script templates
-const { seedScriptTemplates } = require('./server/db/seed-scripts');
+const { seedScriptTemplates, seedMissingScriptTemplates } = require('./server/db/seed-scripts');
 const scriptResult = seedScriptTemplates(db);
 console.log(scriptResult.seeded ? 'Script templates seeded: ' + scriptResult.count : 'Script templates already exist.');
+
+// Seed any missing script templates (new additions)
+const missingResult = seedMissingScriptTemplates(db);
+console.log(missingResult.added > 0 ? 'Added ' + missingResult.added + ' new script templates.' : 'All script templates already exist.');
 
 db.close();
 "

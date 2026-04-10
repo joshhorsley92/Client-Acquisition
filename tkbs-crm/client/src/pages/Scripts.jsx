@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
 
-const STAGES = ['lead', 'outreach', 'discovery_call', 'proposal', 'follow_up', 'closed_won'];
+const STAGES = ['prospect', 'lead', 'outreach', 'discovery_call', 'proposal', 'follow_up', 'closed_won'];
 const TYPES = ['email', 'call_script', 'objection', 'checklist', 'follow_up'];
 
 export default function Scripts() {
