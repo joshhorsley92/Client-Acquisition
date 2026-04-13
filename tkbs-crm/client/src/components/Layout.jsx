@@ -8,6 +8,7 @@ const navItems = [
   { to: '/tasks', label: 'Tasks', icon: '☑' },
   { to: '/contacts', label: 'Contacts', icon: '☻' },
   { to: '/companies', label: 'Companies', icon: '⌂' },
+  { to: '/calls', label: 'Calls', icon: '☎' },
   { to: '/scripts', label: 'Scripts', icon: '✎' },
   { to: '/reports', label: 'Reports', icon: '▦' },
   { to: '/settings', label: 'Settings', icon: '⚙' },

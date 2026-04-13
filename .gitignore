@@ -28,6 +28,9 @@ env/
 # Claude Code local settings (contains secrets like SLACK_WEBHOOK_URL)
 .claude/settings.local.json
 
+# Uploaded audio files for call recordings (potentially sensitive)
+tkbs-crm/uploads/
+
 # OS
 .DS_Store
 Thumbs.db

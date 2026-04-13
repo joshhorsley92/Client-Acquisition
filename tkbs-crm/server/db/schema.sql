@@ -190,3 +190,27 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
+
+CREATE TABLE IF NOT EXISTS call_recordings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deal_id INTEGER REFERENCES deals(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  call_date TEXT,
+  duration_minutes INTEGER,
+  audio_path TEXT,
+  audio_original_name TEXT,
+  audio_size_bytes INTEGER,
+  transcript TEXT,
+  transcript_source TEXT CHECK(transcript_source IN ('pasted', 'whisper', 'zoom', 'meet', 'manual')),
+  notes TEXT,
+  extracted_profile_json TEXT,
+  review_status TEXT NOT NULL DEFAULT 'none' CHECK(review_status IN ('none', 'pending', 'approved', 'rejected')),
+  pushed_to_dashboard_at TEXT,
+  dashboard_user_id TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_recordings_deal_id ON call_recordings(deal_id);
+CREATE INDEX IF NOT EXISTS idx_call_recordings_created_at ON call_recordings(created_at DESC);

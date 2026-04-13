@@ -63,6 +63,7 @@ function createApp(testDb) {
   app.use('/api/sms', require('./routes/sms'));
   app.use('/api/intake', require('./routes/intake'));
   app.use('/api/import', require('./routes/import'));
+  app.use('/api/calls', require('./routes/calls'));
 
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {

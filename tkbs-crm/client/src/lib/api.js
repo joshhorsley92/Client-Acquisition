@@ -74,6 +74,25 @@ export const api = {
   // Audit log (admin only)
   getAuditLog: (params) => request(`/settings/audit-log${params ? '?' + new URLSearchParams(params) : ''}`),
 
+  // Call recordings — Initiative 1 capture layer
+  getCalls: (params) => request(`/calls${params ? '?' + new URLSearchParams(params) : ''}`),
+  getCall: (id) => request(`/calls/${id}`),
+  updateCall: (id, body) => request(`/calls/${id}`, { method: 'PATCH', body }),
+  deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
+  extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
+  // Create accepts FormData (multipart) since it may include an audio file.
+  // Can't use the normal request() helper which assumes JSON.
+  createCall: async (formData) => {
+    const res = await fetch(`/api/calls`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+    return data;
+  },
+
   // Generic request helper for settings
   request: (path, options = {}) => request(path, options),
 };

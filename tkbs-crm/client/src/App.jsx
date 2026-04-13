@@ -12,6 +12,8 @@ import Scripts from './pages/Scripts';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Import from './pages/Import';
+import Calls from './pages/Calls';
+import CallDetail from './pages/CallDetail';
 
 export const AuthContext = createContext(null);
 
@@ -79,6 +81,8 @@ export default function App() {
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
             <Route path="import" element={<Import />} />
+            <Route path="calls" element={<Calls />} />
+            <Route path="calls/:id" element={<CallDetail />} />
           </Route>
         </Routes>
       </BrowserRouter>
