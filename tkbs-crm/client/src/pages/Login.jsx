@@ -3,25 +3,43 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../App';
 
 export default function Login() {
-  const { user, login } = useAuth();
+  const { user, login, verifyTotp } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   if (user) return <Navigate to="/" />;
+
+  const isRateLimit = error && /too many/i.test(error);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      if (mfaRequired) {
+        await verifyTotp(email, password, totpCode);
+      } else {
+        const data = await login(email, password);
+        if (data?.mfa_required) {
+          setMfaRequired(true);
+          setTotpCode('');
+        }
+      }
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetToLogin = () => {
+    setMfaRequired(false);
+    setTotpCode('');
+    setError('');
   };
 
   return (
@@ -43,46 +61,88 @@ export default function Login() {
 
         {error && (
           <div style={{
-            background: '#FFF3E0', color: '#E6A817', padding: '8px 12px',
-            borderRadius: 4, fontSize: 13, marginBottom: 16,
+            background: isRateLimit ? '#FEE2E2' : '#FFF3E0',
+            color: isRateLimit ? '#dc2626' : '#E6A817',
+            padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 16,
           }}>
             {error}
           </div>
         )}
 
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Email</label>
-          <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            required autoFocus
-            style={{
-              width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
-              borderRadius: 4, fontSize: 14, outline: 'none',
-            }}
-          />
-        </div>
+        {!mfaRequired && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Email</label>
+              <input
+                type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                required autoFocus autoComplete="email"
+                style={{
+                  width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
+                  borderRadius: 4, fontSize: 14, outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
 
-        <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Password</label>
-          <input
-            type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{
-              width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
-              borderRadius: 4, fontSize: 14, outline: 'none',
-            }}
-          />
-        </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Password</label>
+              <input
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                required autoComplete="current-password"
+                style={{
+                  width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
+                  borderRadius: 4, fontSize: 14, outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          </>
+        )}
+
+        {mfaRequired && (
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>
+              Verification Code
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              autoComplete="one-time-code"
+              autoFocus
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="000000"
+              style={{
+                width: '100%', padding: '12px', border: '1px solid #E2E6EB',
+                borderRadius: 4, fontSize: 22, letterSpacing: 8, textAlign: 'center',
+                outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
+              }}
+            />
+            <div style={{ fontSize: 12, color: '#64748B', marginTop: 8, textAlign: 'center' }}>
+              Enter the 6-digit code from your authenticator app
+            </div>
+            <button
+              type="button" onClick={resetToLogin}
+              style={{
+                marginTop: 8, background: 'none', border: 'none', color: '#64748B',
+                fontSize: 12, cursor: 'pointer', padding: 0, textAlign: 'center', width: '100%',
+              }}
+            >
+              ← Back to login
+            </button>
+          </div>
+        )}
 
         <button
-          type="submit" disabled={loading}
+          type="submit" disabled={loading || (mfaRequired && totpCode.length !== 6)}
           style={{
             width: '100%', padding: '10px 0', background: '#00D4AA', color: '#1B2838',
             border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
-            cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
+            cursor: (loading || (mfaRequired && totpCode.length !== 6)) ? 'not-allowed' : 'pointer',
+            opacity: (loading || (mfaRequired && totpCode.length !== 6)) ? 0.6 : 1,
           }}
         >
-          {loading ? 'Signing in...' : 'Sign In'}
+          {loading ? (mfaRequired ? 'Verifying...' : 'Signing in...') : (mfaRequired ? 'Verify' : 'Sign In')}
         </button>
       </form>
     </div>

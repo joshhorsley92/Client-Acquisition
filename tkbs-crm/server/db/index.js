@@ -24,6 +24,8 @@ function initDb() {
 
   // Migrations - add columns if they don't exist
   try { database.exec('ALTER TABLE tasks ADD COLUMN notes TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
 
   // Add prospect stage action if missing (running DB migration)
   try {

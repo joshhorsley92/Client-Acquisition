@@ -33,6 +33,18 @@ function createApp(testDb) {
     app.use((req, res, next) => { req.db = db; next(); });
   }
 
+  // Audit middleware — must come after db middleware so req.audit() can write
+  const { auditMiddleware } = require('./middleware/audit');
+  app.use(auditMiddleware);
+
+  // Rate limiting on auth routes (brute-force defense). Skip in tests —
+  // the in-memory counter would bleed across test cases and cause false 429s.
+  if (!testDb) {
+    const { authLimiter } = require('./middleware/rate-limit');
+    app.use('/api/auth/login', authLimiter);
+    app.use('/api/auth/verify-totp', authLimiter);
+  }
+
   // Routes
   app.use('/api/auth', require('./routes/auth'));
   app.use('/api/companies', require('./routes/companies'));

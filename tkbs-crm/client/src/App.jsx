@@ -39,7 +39,24 @@ export default function App() {
 
   const login = async (email, password) => {
     const data = await api.login({ email, password });
+    if (data.mfa_required) return data; // Caller handles TOTP step
     setUser(data.user);
+    return data;
+  };
+
+  const verifyTotp = async (email, password, token) => {
+    const data = await api.verifyTotp({ email, password, token });
+    setUser(data.user);
+    return data;
+  };
+
+  const refreshUser = async () => {
+    try {
+      const data = await api.me();
+      setUser(data.user);
+    } catch {
+      setUser(null);
+    }
   };
 
   const logout = async () => {
@@ -48,7 +65,7 @@ export default function App() {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, verifyTotp, refreshUser, logout }}>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />

@@ -20,8 +20,12 @@ async function request(path, options = {}) {
 export const api = {
   // Auth
   login: (body) => request('/auth/login', { method: 'POST', body }),
+  verifyTotp: (body) => request('/auth/verify-totp', { method: 'POST', body }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/auth/me'),
+  setupTotp: () => request('/auth/setup-totp', { method: 'POST' }),
+  enableTotp: (body) => request('/auth/enable-totp', { method: 'POST', body }),
+  disableTotp: (body) => request('/auth/disable-totp', { method: 'POST', body }),
 
   // Companies
   getCompanies: () => request('/companies'),
@@ -66,6 +70,9 @@ export const api = {
   getReportSources: () => request('/reports/sources'),
   getReportLostReasons: () => request('/reports/lost-reasons'),
   getReportMonthly: () => request('/reports/monthly'),
+
+  // Audit log (admin only)
+  getAuditLog: (params) => request(`/settings/audit-log${params ? '?' + new URLSearchParams(params) : ''}`),
 
   // Generic request helper for settings
   request: (path, options = {}) => request(path, options),

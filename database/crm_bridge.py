@@ -1,7 +1,27 @@
+import json
 import logging
+import subprocess
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+
+def _is_cli_available() -> bool:
+    """Check if Claude Code CLI is installed."""
+    try:
+        result = subprocess.run(['claude', '--version'], capture_output=True, timeout=10)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _interpolate_prompt(template: str, context: dict) -> str:
+    """Replace {field} placeholders in a prompt template with context values. Preserves unmatched placeholders."""
+    import re
+    def replacer(match):
+        key = match.group(1)
+        return str(context.get(key, match.group(0)))
+    return re.sub(r'\{(\w+)\}', replacer, template)
 
 # SQL to create CRM tables (only for testing — in production these already exist)
 CRM_TABLES_SQL = """
@@ -188,11 +208,9 @@ def register_document(db, deal_id: int, file_path: str, file_name: str, doc_type
 def _execute_stage_actions(db, deal_id: int, stage: str) -> dict:
     """Execute stage actions for a deal, replicating CRM stage-actions.js logic.
 
-    Handles 'create_tasks' and 'start_cadence' action types.
-    Skips 'trigger_skill' and 'record' (require Node.js).
+    Handles 'create_tasks', 'start_cadence', and 'trigger_skill' action types.
+    Skips 'record' (requires Node.js).
     """
-    import json
-
     result = {"tasks_created": 0}
 
     actions = db.conn.execute(
@@ -232,10 +250,78 @@ def _execute_stage_actions(db, deal_id: int, stage: str) -> dict:
                 )
                 result["tasks_created"] += 1
 
+        elif action_type == "trigger_skill":
+            if not _is_cli_available():
+                logger.warning(f"Skipping trigger_skill for deal {deal_id}: Claude CLI not available")
+                continue
+
+            # Load deal context
+            deal_row = db.conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone()
+            if not deal_row:
+                continue
+            deal_dict = dict(deal_row) if hasattr(deal_row, 'keys') else {}
+
+            company_id = deal_dict.get("company_id")
+            contact_id = deal_dict.get("contact_id")
+
+            company = {}
+            if company_id:
+                company_row = db.conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+                if company_row:
+                    company = dict(company_row) if hasattr(company_row, 'keys') else {}
+
+            contact = {}
+            if contact_id:
+                contact_row = db.conn.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
+                if contact_row:
+                    contact = dict(contact_row) if hasattr(contact_row, 'keys') else {}
+
+            context = {
+                "company": company.get("name", ""),
+                "contact": contact.get("name", ""),
+                "location": company.get("location", ""),
+                "industry": company.get("industry", ""),
+                "type": company.get("type", ""),
+                "source_detail": deal_dict.get("source_detail", ""),
+                "notes": deal_dict.get("call_notes", ""),
+                "package_type": deal_dict.get("package_type", ""),
+                "services_discussed": deal_dict.get("services_discussed", ""),
+                "pricing_notes": deal_dict.get("pricing_notes", ""),
+                "call_notes": deal_dict.get("call_notes", ""),
+            }
+
+            prompt = _interpolate_prompt(config.get("prompt_template", ""), context)
+            skill_name = config.get("skill", "unknown")
+
+            try:
+                # Fire-and-forget (non-blocking, matches Node.js pattern)
+                subprocess.Popen(
+                    ['claude', '--print', prompt],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"Triggered skill '{skill_name}' for deal {deal_id}")
+
+                # Log activity
+                db.conn.execute(
+                    """INSERT INTO activities (deal_id, type, content, metadata, created_by, created_at)
+                       VALUES (?, 'system', ?, ?, NULL, ?)""",
+                    (
+                        deal_id,
+                        f"AI skill triggered: {skill_name}",
+                        json.dumps({"skill": skill_name, "stage": stage}),
+                        datetime.now().isoformat(),
+                    )
+                )
+
+                result["skills_triggered"] = result.get("skills_triggered", 0) + 1
+            except Exception as e:
+                logger.warning(f"Failed to trigger skill '{skill_name}' for deal {deal_id}: {e}")
+
     return result
 
 
-def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
+def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1, dry_run: bool = False):
     """
     Push enriched leads from acq_leads into CRM tables (companies, contacts, deals).
 
@@ -243,9 +329,12 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
         db: Database instance (shared SQLite connection)
         lead_ids: Optional list of specific lead IDs to push. If None, pushes all 'enriched' leads.
         owner_id: CRM user ID to assign deals to (default: 1, the admin user)
+        dry_run: If True, run SELECT/dedup queries but skip INSERT/UPDATE/commit, returning
+            a preview of planned changes.
 
     Returns:
-        dict with counts: {"pushed": N, "skipped": M, "errors": E}
+        In normal mode: {"pushed": N, "skipped": M, "errors": E}
+        In dry_run mode: {"previews": [...], "summary": {"would_push": N, "would_skip": M}}
     """
     # Get leads to push
     if lead_ids:
@@ -258,6 +347,30 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
         leads = db.get_leads_by_status("enriched")
 
     results = {"pushed": 0, "skipped": 0, "errors": 0}
+    previews = [] if dry_run else None
+    summary = {"would_push": 0, "would_skip": 0} if dry_run else None
+
+    # Pre-compute task preview (for dry_run) from stage_actions
+    task_preview_count = 0
+    task_preview_names: list[str] = []
+    if dry_run:
+        try:
+            action_rows = db.conn.execute(
+                "SELECT config FROM stage_actions WHERE stage = 'lead' AND action_type = 'create_tasks' AND enabled = 1 ORDER BY sort_order ASC"
+            ).fetchall()
+            for row in action_rows:
+                cfg_raw = row["config"] if hasattr(row, "keys") else row[0]
+                try:
+                    cfg = json.loads(cfg_raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                for task in cfg.get("tasks", []):
+                    task_preview_count += 1
+                    desc = task.get("description")
+                    if desc:
+                        task_preview_names.append(desc)
+        except Exception as e:
+            logger.warning(f"Failed to preview stage actions: {e}")
 
     for lead in leads:
         try:
@@ -265,8 +378,25 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
             business_name = lead.get("business_name")
             if not business_name:
                 logger.warning(f"Lead {lead_id} has no business name, skipping")
-                results["skipped"] += 1
+                if dry_run:
+                    previews.append({
+                        "business_name": "(no name)",
+                        "platform": lead.get("platform_source", "unknown"),
+                        "detail": "no reviews",
+                        "company_action": "N/A",
+                        "contact_action": "N/A",
+                        "skip_reason": "Lead has no business name",
+                        "task_count": 0,
+                        "task_names": [],
+                    })
+                    summary["would_skip"] += 1
+                else:
+                    results["skipped"] += 1
                 continue
+
+            platform = lead.get("platform_source", "unknown")
+            review_count = lead.get("review_count", 0)
+            detail = f"{review_count} reviews" if review_count else "no reviews"
 
             # 1. Company dedup
             existing_company = db.conn.execute(
@@ -274,44 +404,71 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
             ).fetchone()
 
             company_id = None
+            company_action = ""
+            skip_reason = None
+
             if existing_company:
                 company_id = existing_company[0] if isinstance(existing_company, tuple) else existing_company["id"]
+                company_action = f"EXISTING (id={company_id})"
                 # Check for active deal
                 active_deal = db.conn.execute(
-                    "SELECT id FROM deals WHERE company_id = ? AND stage NOT IN ('closed_won', 'closed_lost')",
+                    "SELECT id, stage FROM deals WHERE company_id = ? AND stage NOT IN ('closed_won', 'closed_lost')",
                     (company_id,)
                 ).fetchone()
                 if active_deal:
-                    logger.info(f"Lead {lead_id} ({business_name}) already has active deal, skipping")
-                    results["skipped"] += 1
-                    db.update_lead_status(lead_id, "contacted")
+                    if isinstance(active_deal, tuple):
+                        active_deal_id, active_stage = active_deal[0], active_deal[1]
+                    else:
+                        active_deal_id, active_stage = active_deal["id"], active_deal["stage"]
+                    skip_reason = f"Active deal already exists (deal #{active_deal_id}, stage={active_stage})"
+
+                    if dry_run:
+                        previews.append({
+                            "business_name": business_name,
+                            "platform": platform,
+                            "detail": detail,
+                            "company_action": company_action,
+                            "contact_action": "",
+                            "skip_reason": skip_reason,
+                            "task_count": 0,
+                            "task_names": [],
+                        })
+                        summary["would_skip"] += 1
+                    else:
+                        logger.info(f"Lead {lead_id} ({business_name}) already has active deal, skipping")
+                        results["skipped"] += 1
+                        db.update_lead_status(lead_id, "contacted")
                     continue
 
-                # Update nulls via COALESCE
-                db.conn.execute("""
-                    UPDATE companies SET
-                        location = COALESCE(location, ?),
-                        industry = COALESCE(industry, ?),
-                        website = COALESCE(website, ?),
-                        updated_at = ?
-                    WHERE id = ?
-                """, (
-                    lead.get("location"),
-                    lead.get("industry"),
-                    lead.get("website_url"),
-                    datetime.now().isoformat(),
-                    company_id,
-                ))
+                if not dry_run:
+                    # Update nulls via COALESCE
+                    db.conn.execute("""
+                        UPDATE companies SET
+                            location = COALESCE(location, ?),
+                            industry = COALESCE(industry, ?),
+                            website = COALESCE(website, ?),
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (
+                        lead.get("location"),
+                        lead.get("industry"),
+                        lead.get("website_url"),
+                        datetime.now().isoformat(),
+                        company_id,
+                    ))
             else:
-                cursor = db.conn.execute(
-                    "INSERT INTO companies (name, location, industry, website) VALUES (?, ?, ?, ?)",
-                    (business_name, lead.get("location"), lead.get("industry"), lead.get("website_url"))
-                )
-                company_id = cursor.lastrowid
+                company_action = "CREATE NEW (no match found)"
+                if not dry_run:
+                    cursor = db.conn.execute(
+                        "INSERT INTO companies (name, location, industry, website) VALUES (?, ?, ?, ?)",
+                        (business_name, lead.get("location"), lead.get("industry"), lead.get("website_url"))
+                    )
+                    company_id = cursor.lastrowid
 
             # 2. Contact dedup
             contacts = db.get_contacts_for_lead(lead_id)
             contact_id = None
+            contact_action = "NONE (no contact on lead)"
 
             if contacts:
                 best_contact = contacts[0]
@@ -323,25 +480,44 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
                     ).fetchone()
                     if existing_contact:
                         contact_id = existing_contact[0] if isinstance(existing_contact, tuple) else existing_contact["id"]
+                        contact_action = f"EXISTING (id={contact_id})"
                     else:
-                        cursor = db.conn.execute(
-                            "INSERT INTO contacts (name, email, phone, role, company_id) VALUES (?, ?, ?, ?, ?)",
-                            (
-                                best_contact.get("name", "Unknown"),
-                                email,
-                                best_contact.get("phone"),
-                                best_contact.get("role"),
-                                company_id,
+                        contact_action = f"CREATE NEW — {email}"
+                        if not dry_run:
+                            cursor = db.conn.execute(
+                                "INSERT INTO contacts (name, email, phone, role, company_id) VALUES (?, ?, ?, ?, ?)",
+                                (
+                                    best_contact.get("name", "Unknown"),
+                                    email,
+                                    best_contact.get("phone"),
+                                    best_contact.get("role"),
+                                    company_id,
+                                )
                             )
+                            contact_id = cursor.lastrowid
+                else:
+                    contact_action = "CREATE NEW — no email"
+                    if not dry_run:
+                        # No email — create contact anyway
+                        cursor = db.conn.execute(
+                            "INSERT INTO contacts (name, role, company_id) VALUES (?, ?, ?)",
+                            (best_contact.get("name", "Unknown"), best_contact.get("role"), company_id)
                         )
                         contact_id = cursor.lastrowid
-                else:
-                    # No email — create contact anyway
-                    cursor = db.conn.execute(
-                        "INSERT INTO contacts (name, role, company_id) VALUES (?, ?, ?)",
-                        (best_contact.get("name", "Unknown"), best_contact.get("role"), company_id)
-                    )
-                    contact_id = cursor.lastrowid
+
+            if dry_run:
+                previews.append({
+                    "business_name": business_name,
+                    "platform": platform,
+                    "detail": detail,
+                    "company_action": company_action,
+                    "contact_action": contact_action,
+                    "skip_reason": None,
+                    "task_count": task_preview_count,
+                    "task_names": list(task_preview_names),
+                })
+                summary["would_push"] += 1
+                continue
 
             # 3. Build research findings from marketing signals
             signals = db.get_signals_for_lead(lead_id)
@@ -380,6 +556,9 @@ def push_leads_to_crm(db, lead_ids: list[str] | None = None, owner_id: int = 1):
 
         except Exception as e:
             logger.error(f"Error pushing lead {lead.get('id')}: {e}")
-            results["errors"] += 1
+            if not dry_run:
+                results["errors"] += 1
 
+    if dry_run:
+        return {"previews": previews, "summary": summary}
     return results

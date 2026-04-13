@@ -25,6 +25,9 @@ env/
 *.swp
 *.swo
 
+# Claude Code local settings (contains secrets like SLACK_WEBHOOK_URL)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

@@ -67,4 +67,25 @@ router.get('/cli-status', (req, res) => {
   res.json({ available: isCliAvailable() });
 });
 
+// Audit log (admin only)
+router.get('/audit-log', requireAdmin, (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
+
+  const logs = req.db.prepare(`
+    SELECT al.id, al.user_id, al.action, al.resource_type, al.resource_id,
+           al.metadata, al.ip_address, al.created_at,
+           u.name AS user_name, u.email AS user_email
+    FROM audit_log al
+    LEFT JOIN users u ON al.user_id = u.id
+    ORDER BY al.created_at DESC, al.id DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset);
+
+  const total = req.db.prepare('SELECT COUNT(*) AS count FROM audit_log').get().count;
+
+  res.json({ logs, total, page, limit });
+});
+
 module.exports = router;

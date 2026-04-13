@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../App';
 import Modal from '../components/Modal';
 
 const INTEGRATION_META = {
@@ -255,6 +256,8 @@ function IntegrationCard({ integration, onToggle, onSave, onDisconnectGoogle }) 
 
 export default function Settings() {
   const location = useLocation();
+  const { user, refreshUser } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [actions, setActions] = useState([]);
   const [users, setUsers] = useState([]);
   const [integrations, setIntegrations] = useState([]);
@@ -263,6 +266,22 @@ export default function Settings() {
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'member' });
   const [activeTab, setActiveTab] = useState('actions');
   const [oauthBanner, setOauthBanner] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const AUDIT_LIMIT = 50;
+
+  // MFA (TOTP) state
+  const [mfaSetup, setMfaSetup] = useState(null); // { qrCode, secret }
+  const [mfaToken, setMfaToken] = useState('');
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [mfaError, setMfaError] = useState('');
+  const [mfaSuccess, setMfaSuccess] = useState('');
+  const [showDisable, setShowDisable] = useState(false);
+  const [disableToken, setDisableToken] = useState('');
+  const [secretCopied, setSecretCopied] = useState(false);
+  const mfaEnabled = !!user?.totp_enabled;
 
   useEffect(() => {
     api.request('/settings/actions').then(d => setActions(d.actions)).catch(() => {});
@@ -325,6 +344,87 @@ export default function Settings() {
     setUsers(d.users);
   };
 
+  useEffect(() => {
+    if (activeTab !== 'audit' || !isAdmin) return;
+    setAuditLoading(true);
+    api.getAuditLog({ page: auditPage, limit: AUDIT_LIMIT })
+      .then((d) => { setAuditLogs(d.logs || []); setAuditTotal(d.total || 0); })
+      .catch(() => { setAuditLogs([]); setAuditTotal(0); })
+      .finally(() => setAuditLoading(false));
+  }, [activeTab, auditPage, isAdmin]);
+
+  const formatAuditTime = (ts) => {
+    if (!ts) return '';
+    // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' in UTC
+    const d = new Date(ts.replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return ts;
+    return d.toLocaleString();
+  };
+
+  const actionBadgeColor = (action) => {
+    if (action === 'login' || action === 'mfa_enabled') return { bg: '#E6FAF5', text: '#00D4AA', border: '#00D4AA' };
+    if (action === 'login_failed' || action === 'mfa_disabled') return { bg: '#FFF3E0', text: '#E6A817', border: '#E6A817' };
+    if (action === 'logout') return { bg: '#F7F8FA', text: '#64748B', border: '#E2E6EB' };
+    return { bg: '#F7F8FA', text: '#1B2838', border: '#E2E6EB' };
+  };
+
+  const auditTotalPages = Math.max(1, Math.ceil(auditTotal / AUDIT_LIMIT));
+
+  const startMfaSetup = async () => {
+    setMfaError(''); setMfaSuccess(''); setMfaBusy(true);
+    try {
+      const data = await api.setupTotp();
+      setMfaSetup({ qrCode: data.qrCode, secret: data.secret });
+      setMfaToken('');
+    } catch (err) {
+      setMfaError(err.message || 'Could not start MFA setup');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const cancelMfaSetup = () => {
+    setMfaSetup(null); setMfaToken(''); setMfaError(''); setSecretCopied(false);
+  };
+
+  const enableMfa = async (e) => {
+    e.preventDefault();
+    setMfaError(''); setMfaBusy(true);
+    try {
+      await api.enableTotp({ token: mfaToken });
+      setMfaSetup(null); setMfaToken(''); setSecretCopied(false);
+      setMfaSuccess('Two-factor authentication is now enabled.');
+      await refreshUser();
+    } catch (err) {
+      setMfaError(err.message || 'Could not enable MFA');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const disableMfa = async (e) => {
+    e.preventDefault();
+    setMfaError(''); setMfaBusy(true);
+    try {
+      await api.disableTotp({ token: disableToken });
+      setShowDisable(false); setDisableToken('');
+      setMfaSuccess('Two-factor authentication disabled.');
+      await refreshUser();
+    } catch (err) {
+      setMfaError(err.message || 'Could not disable MFA');
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const copySecret = () => {
+    if (!mfaSetup?.secret) return;
+    navigator.clipboard?.writeText(mfaSetup.secret).then(
+      () => { setSecretCopied(true); setTimeout(() => setSecretCopied(false), 2000); },
+      () => {}
+    );
+  };
+
   const tabStyle = (t) => ({
     padding: '8px 16px', fontSize: 13, fontWeight: activeTab === t ? 600 : 400,
     color: activeTab === t ? '#00D4AA' : '#64748B', background: 'none', border: 'none',
@@ -349,6 +449,10 @@ export default function Settings() {
         <button onClick={() => setActiveTab('actions')} style={tabStyle('actions')}>Stage Actions</button>
         <button onClick={() => setActiveTab('users')} style={tabStyle('users')}>Team</button>
         <button onClick={() => setActiveTab('integrations')} style={tabStyle('integrations')}>Integrations</button>
+        <button onClick={() => setActiveTab('security')} style={tabStyle('security')}>Security</button>
+        {isAdmin && (
+          <button onClick={() => setActiveTab('audit')} style={tabStyle('audit')}>Audit Log</button>
+        )}
       </div>
 
       {activeTab === 'actions' && (
@@ -475,6 +579,308 @@ export default function Settings() {
               }}>Create User</button>
             </form>
           </Modal>
+        </div>
+      )}
+
+      {activeTab === 'security' && (
+        <div>
+          <div style={{ marginBottom: 16, fontSize: 13, color: '#64748B' }}>
+            Two-factor authentication adds a second verification step at sign-in using an authenticator app (Google Authenticator, Authy, 1Password, etc.).
+          </div>
+
+          {mfaSuccess && (
+            <div style={{
+              background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA',
+              padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 16,
+            }}>
+              {mfaSuccess}
+            </div>
+          )}
+
+          {mfaError && (
+            <div style={{
+              background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817',
+              padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 16,
+            }}>
+              {mfaError}
+            </div>
+          )}
+
+          <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1B2838' }}>Two-Factor Authentication</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                  {mfaEnabled ? 'Required at every sign-in for this account.' : 'Not enabled — protect your account with an authenticator app.'}
+                </div>
+              </div>
+              <span style={{
+                fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                background: mfaEnabled ? '#E6FAF5' : '#F7F8FA',
+                color: mfaEnabled ? '#00D4AA' : '#94A3B8',
+                border: `1px solid ${mfaEnabled ? '#00D4AA' : '#E2E6EB'}`,
+              }}>
+                {mfaEnabled ? 'Enabled' : 'Not enabled'}
+              </span>
+            </div>
+
+            {/* Not enabled + no setup in flight: offer to start */}
+            {!mfaEnabled && !mfaSetup && (
+              <button
+                onClick={startMfaSetup} disabled={mfaBusy}
+                style={{
+                  padding: '10px 16px', background: '#00D4AA', color: '#1B2838',
+                  border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                  cursor: mfaBusy ? 'not-allowed' : 'pointer', opacity: mfaBusy ? 0.6 : 1,
+                }}
+              >
+                {mfaBusy ? 'Starting...' : 'Enable Two-Factor Authentication'}
+              </button>
+            )}
+
+            {/* Setup in progress: show QR + secret + verify */}
+            {!mfaEnabled && mfaSetup && (
+              <form onSubmit={enableMfa}>
+                <div style={{ marginBottom: 16, fontSize: 13, color: '#1B2838' }}>
+                  <strong>1.</strong> Scan this QR code with your authenticator app, or enter the secret manually.
+                </div>
+
+                <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                  <img
+                    src={mfaSetup.qrCode}
+                    alt="MFA QR code"
+                    style={{ width: 200, height: 200, border: '1px solid #E2E6EB', borderRadius: 4, padding: 8, background: '#fff' }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Secret (manual entry)</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text" readOnly value={mfaSetup.secret}
+                      style={{
+                        flex: 1, padding: '8px 10px', border: '1px solid #E2E6EB',
+                        borderRadius: 4, fontSize: 13, fontFamily: 'monospace',
+                        background: '#F7F8FA', color: '#1B2838', outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="button" onClick={copySecret}
+                      style={{
+                        padding: '8px 14px', background: '#fff', color: '#1B2838',
+                        border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13,
+                        fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      {secretCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 16, fontSize: 13, color: '#1B2838' }}>
+                  <strong>2.</strong> Enter the 6-digit code from your app to confirm.
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                    autoComplete="one-time-code" autoFocus
+                    value={mfaToken}
+                    onChange={(e) => setMfaToken(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000"
+                    style={{
+                      width: '100%', padding: '12px', border: '1px solid #E2E6EB',
+                      borderRadius: 4, fontSize: 22, letterSpacing: 8, textAlign: 'center',
+                      outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="submit" disabled={mfaBusy || mfaToken.length !== 6}
+                    style={{
+                      flex: 1, padding: '10px 0', background: '#00D4AA', color: '#1B2838',
+                      border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                      cursor: (mfaBusy || mfaToken.length !== 6) ? 'not-allowed' : 'pointer',
+                      opacity: (mfaBusy || mfaToken.length !== 6) ? 0.6 : 1,
+                    }}
+                  >
+                    {mfaBusy ? 'Verifying...' : 'Verify & Enable'}
+                  </button>
+                  <button
+                    type="button" onClick={cancelMfaSetup} disabled={mfaBusy}
+                    style={{
+                      padding: '10px 16px', background: '#fff', color: '#1B2838',
+                      border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14,
+                      fontWeight: 600, cursor: mfaBusy ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Enabled: offer disable */}
+            {mfaEnabled && !showDisable && (
+              <button
+                onClick={() => { setShowDisable(true); setDisableToken(''); setMfaError(''); }}
+                style={{
+                  padding: '10px 16px', background: '#fff', color: '#E6A817',
+                  border: '1px solid #E6A817', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Disable Two-Factor Authentication
+              </button>
+            )}
+
+            {mfaEnabled && showDisable && (
+              <form onSubmit={disableMfa}>
+                <div style={{ marginBottom: 12, fontSize: 13, color: '#1B2838' }}>
+                  Enter your current 6-digit code to confirm disabling MFA.
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                    autoComplete="one-time-code" autoFocus
+                    value={disableToken}
+                    onChange={(e) => setDisableToken(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000"
+                    style={{
+                      width: '100%', padding: '12px', border: '1px solid #E2E6EB',
+                      borderRadius: 4, fontSize: 22, letterSpacing: 8, textAlign: 'center',
+                      outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="submit" disabled={mfaBusy || disableToken.length !== 6}
+                    style={{
+                      flex: 1, padding: '10px 0', background: '#E6A817', color: '#fff',
+                      border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                      cursor: (mfaBusy || disableToken.length !== 6) ? 'not-allowed' : 'pointer',
+                      opacity: (mfaBusy || disableToken.length !== 6) ? 0.6 : 1,
+                    }}
+                  >
+                    {mfaBusy ? 'Disabling...' : 'Confirm Disable'}
+                  </button>
+                  <button
+                    type="button" onClick={() => { setShowDisable(false); setDisableToken(''); }}
+                    disabled={mfaBusy}
+                    style={{
+                      padding: '10px 16px', background: '#fff', color: '#1B2838',
+                      border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                      cursor: mfaBusy ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'audit' && isAdmin && (
+        <div>
+          <div style={{ marginBottom: 12, fontSize: 13, color: '#64748B' }}>
+            Security-sensitive events: logins, logouts, and MFA changes. Admin-only.
+          </div>
+
+          {auditLoading ? (
+            <div style={{ padding: 24, fontSize: 13, color: '#64748B' }}>Loading audit log...</div>
+          ) : auditLogs.length === 0 ? (
+            <div style={{
+              background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 24,
+              fontSize: 13, color: '#64748B', textAlign: 'center',
+            }}>
+              No audit entries yet.
+            </div>
+          ) : (
+            <>
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#1B2838', color: '#fff' }}>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Timestamp</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>User</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Action</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Resource</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((log, i) => {
+                      const colors = actionBadgeColor(log.action);
+                      return (
+                        <tr key={log.id} style={{ background: i % 2 === 0 ? '#fff' : '#F7F8FA' }}>
+                          <td style={{ padding: '10px 16px', color: '#64748B', fontSize: 12 }}>{formatAuditTime(log.created_at)}</td>
+                          <td style={{ padding: '10px 16px' }}>
+                            {log.user_name ? (
+                              <>
+                                <div style={{ color: '#1B2838' }}>{log.user_name}</div>
+                                <div style={{ color: '#94a3b8', fontSize: 11 }}>{log.user_email}</div>
+                              </>
+                            ) : (
+                              <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 16px' }}>
+                            <span style={{
+                              fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
+                              background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`,
+                            }}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 16px', color: '#64748B' }}>
+                            {log.resource_type ? `${log.resource_type}${log.resource_id ? ` #${log.resource_id}` : ''}` : '—'}
+                          </td>
+                          <td style={{ padding: '10px 16px', color: '#94a3b8', fontSize: 12 }}>{log.ip_address || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginTop: 12, fontSize: 13, color: '#64748B',
+              }}>
+                <div>
+                  Showing {(auditPage - 1) * AUDIT_LIMIT + 1}–{Math.min(auditPage * AUDIT_LIMIT, auditTotal)} of {auditTotal}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                    disabled={auditPage <= 1}
+                    style={{
+                      padding: '6px 12px', fontSize: 13, background: '#fff',
+                      color: auditPage <= 1 ? '#94a3b8' : '#1B2838',
+                      border: '1px solid #E2E6EB', borderRadius: 4,
+                      cursor: auditPage <= 1 ? 'not-allowed' : 'pointer',
+                    }}
+                  >Previous</button>
+                  <span style={{ padding: '6px 4px' }}>Page {auditPage} of {auditTotalPages}</span>
+                  <button
+                    onClick={() => setAuditPage((p) => Math.min(auditTotalPages, p + 1))}
+                    disabled={auditPage >= auditTotalPages}
+                    style={{
+                      padding: '6px 12px', fontSize: 13, background: '#fff',
+                      color: auditPage >= auditTotalPages ? '#94a3b8' : '#1B2838',
+                      border: '1px solid #E2E6EB', borderRadius: 4,
+                      cursor: auditPage >= auditTotalPages ? 'not-allowed' : 'pointer',
+                    }}
+                  >Next</button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

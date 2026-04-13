@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"c:/Client-Acquisition/.claude/hooks/notify-slack.sh\"",
+            "async": true,
+            "statusMessage": "Notifying Josh on Slack..."
+          }
+        ]
+      }
+    ]
+  }
+}

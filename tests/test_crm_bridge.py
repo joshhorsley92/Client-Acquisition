@@ -263,3 +263,54 @@ def test_push_disabled_stage_action_skipped(db):
 
     tasks = db.conn.execute("SELECT * FROM tasks").fetchall()
     assert len(tasks) == 0
+
+
+def test_push_dry_run_no_writes(db):
+    """Dry-run mode should not write any rows to the database."""
+    lead = db.upsert_lead({
+        "business_name": "Dry Run Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/dryrun",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+    db.insert_contact({"lead_id": lead["id"], "name": "Jane", "email": "jane@dry.com", "source": "website"})
+
+    results = push_leads_to_crm(db, dry_run=True)
+
+    # No writes
+    assert db.conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0] == 0
+    assert db.conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0] == 0
+    assert db.conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0] == 0
+
+    # Previews returned
+    assert "previews" in results
+    assert len(results["previews"]) == 1
+    assert results["previews"][0]["business_name"] == "Dry Run Shop"
+    assert "CREATE NEW" in results["previews"][0]["company_action"]
+    assert results["summary"]["would_push"] == 1
+    assert results["summary"]["would_skip"] == 0
+
+
+def test_push_dry_run_detects_skip(db):
+    """Dry-run should correctly detect leads that would be skipped due to existing active deal."""
+    db.conn.execute("INSERT INTO companies (name) VALUES ('Active Shop')")
+    company_id = db.conn.execute("SELECT id FROM companies WHERE name = 'Active Shop'").fetchone()[0]
+    db.conn.execute(
+        "INSERT INTO deals (company_id, stage, source, created_at, updated_at) VALUES (?, 'outreach', 'cold', datetime('now'), datetime('now'))",
+        (company_id,)
+    )
+    db.conn.commit()
+
+    lead = db.upsert_lead({
+        "business_name": "Active Shop",
+        "platform_source": "etsy",
+        "platform_url": "https://etsy.com/shop/active",
+    })
+    db.update_lead_status(lead["id"], "enriched")
+
+    results = push_leads_to_crm(db, dry_run=True)
+
+    assert results["summary"]["would_skip"] == 1
+    assert results["summary"]["would_push"] == 0
+    assert results["previews"][0]["skip_reason"] is not None
+    assert "Active deal" in results["previews"][0]["skip_reason"]

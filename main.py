@@ -170,22 +170,40 @@ def stats():
 @cli.command()
 @click.option("--lead-id", multiple=True, help="Specific lead IDs to push (can specify multiple)")
 @click.option("--owner-id", default=1, type=int, help="CRM user ID to assign deals to")
-def push(lead_id, owner_id):
+@click.option("--dry-run", is_flag=True, help="Preview changes without writing to CRM")
+def push(lead_id, owner_id, dry_run):
     """Push enriched leads into the CRM pipeline."""
     db = get_db()
     lead_ids = list(lead_id) if lead_id else None
 
-    if lead_ids:
+    if dry_run:
+        click.echo("DRY RUN — no changes will be made\n")
+    elif lead_ids:
         click.echo(f"Pushing {len(lead_ids)} specific leads to CRM...")
     else:
         click.echo("Pushing all enriched leads to CRM...")
 
-    results = push_leads_to_crm(db, lead_ids=lead_ids, owner_id=owner_id)
+    results = push_leads_to_crm(db, lead_ids=lead_ids, owner_id=owner_id, dry_run=dry_run)
 
-    click.echo(f"\nResults:")
-    click.echo(f"  Pushed: {results['pushed']}")
-    click.echo(f"  Skipped: {results['skipped']}")
-    click.echo(f"  Errors: {results['errors']}")
+    if dry_run:
+        for preview in results.get("previews", []):
+            click.echo(f'Lead: "{preview["business_name"]}" ({preview["platform"]}, {preview["detail"]})')
+            click.echo(f'  -> Company: {preview["company_action"]}')
+            if preview.get("skip_reason"):
+                click.echo(f'  -> SKIP: {preview["skip_reason"]}')
+            else:
+                click.echo(f'  -> Contact: {preview["contact_action"]}')
+                click.echo(f'  -> Deal: stage=lead, source=cold')
+                if preview.get("task_count"):
+                    click.echo(f'  -> Tasks: {preview["task_count"]} auto-tasks ({", ".join(preview.get("task_names", []))})')
+            click.echo()
+        summary = results.get("summary", {})
+        click.echo(f'Summary: Would push {summary.get("would_push", 0)}, would skip {summary.get("would_skip", 0)}, 0 errors')
+    else:
+        click.echo(f"\nResults:")
+        click.echo(f"  Pushed: {results['pushed']}")
+        click.echo(f"  Skipped: {results['skipped']}")
+        click.echo(f"  Errors: {results['errors']}")
 
 
 @cli.command()
