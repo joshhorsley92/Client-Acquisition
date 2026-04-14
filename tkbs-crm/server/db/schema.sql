@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS deals (
   source TEXT CHECK(source IN ('referral', 'cold', 'web', 'content', 'paid_ads')),
   source_detail TEXT,
   estimated_value REAL DEFAULT 0,
+  fit_score INTEGER,
+  fit_score_breakdown TEXT,
   package_type TEXT CHECK(package_type IN ('boost', 'launch', 'both', 'undecided')),
   services_discussed TEXT DEFAULT '[]',
   pricing_notes TEXT,

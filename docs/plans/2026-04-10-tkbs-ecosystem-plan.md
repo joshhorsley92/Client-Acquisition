@@ -324,14 +324,61 @@ The Dashboard stays on public internet (Supabase cloud) because it's meant to be
 
 ---
 
-## 10. Current status (updated 2026-04-12)
+## 10. Current status (updated 2026-04-12 — end of day 2)
 
-**All 5 open questions resolved.** No blockers remain for Initiatives 1 or 3. Initiative 2's Fit Score engine is blocked on the ICP definition exercise (Joe + Claude, ~30 min, must happen before Week 4).
+### Shipped and committed
 
-**Ready to start:** Week 1 foundation work:
-1. Initiative 3: audit log + MFA + rate limiting + Tailscale prep
-2. Unstub `trigger_skill` in `database/crm_bridge.py`
-3. Add `push --dry-run` safety prompt
-4. Then: Initiative 1 (Call → Brand Profile pipeline)
+| Task | Commit | Status |
+|------|--------|--------|
+| Week 1 Foundation: audit log, MFA, rate limiting, trigger_skill, push --dry-run | `e7c23d6` | ✅ Live, 90/90 Node + 21/21 Python tests passing |
+| Initiative 1 Stage 1: call capture (table, upload UI, detail page, `/calls` route) | `c7a598c` | ✅ Live, tested end-to-end |
+| Initiative 1 Stage 3: Claude Brand Profile extraction (Opus 4.6, schema, sidebar preview) | `c7a598c` | ✅ Live, tested end-to-end with sample transcript |
+| ICP codified (`server/config/icp.json`) | `c7a598c` | ✅ Done — Retail/Service/B2B, $500K-$10M, Michigan-preferred |
 
-**Key design change from §7 answers:** Initiative 1's architecture shifts from "one-shot Brand Profile push at review" to "incremental Brand Profile building across multiple calls during the sales process." The CRM Review UI must support patch-on-existing, not just first-write. Prospect gets a Supabase account early (at Lead/Discovery stage), starts as `prospect` tier, upgrades to `launch` at Closed Won.
+### Deferred
+
+- **Initiative 1 Stage 2 (Whisper transcription):** deferred per Joe. Transcripts are manually pasted for now.
+- **Initiative 3 Tailscale deployment + Caddy HTTPS:** deferred; still on the roadmap.
+
+### Open decision blocking Initiative 1 Stage 4b
+
+**How does the CRM create a Supabase user for a prospect and write a Brand Profile to the Dashboard?**
+
+Three options:
+1. CRM writes directly to Supabase via service-role key (fast, tight coupling)
+2. Add a new admin endpoint to the Dashboard (`POST /api/admin/prospects`) that the CRM calls — cleaner separation, requires editing two repos
+3. Use only existing Dashboard endpoints — not viable, no user-creation endpoint exists
+
+**Recommendation:** option 2. Preserves RLS boundary. Minimal Dashboard-side code (one endpoint). Requires a cross-repo PR.
+
+**Joe hasn't answered this yet** — needed before Stage 4b ships.
+
+### Recommended next sequence (Path C from end-of-day discussion)
+
+Joe leaning toward Path C (parallel tracks):
+
+1. **Stage 4a** — editable review UI on `/calls/:id` (edits save to CRM only, no Dashboard push yet). ~2-3 days. No blockers.
+2. **Initiative 2 Fit Score engine** — delegated to an agent in parallel. Reads `icp.json`, scores deals on creation, surfaces on pipeline cards. ~2-3 days. No blockers.
+3. **Joe answers the Dashboard architecture question** while 1+2 are in flight.
+4. **Stage 4b + Stage 5** — Dashboard push + Closed Won handoff. ~3-4 days. Blocked on the decision.
+
+**Pick-up point for tomorrow:** Joe to confirm Path C, then kick off Stage 4a + Fit Score engine in parallel.
+
+### Key design notes for Stage 4a
+
+- Make every field in the extracted profile editable inline (scalars = text inputs, arrays = tag inputs)
+- Show `source_quote` from sidecar on hover / expand — lets Josh verify extractions
+- Reject individual fields (ignore them on push) — add a "keep / reject" toggle per field
+- Save updates to `call_recordings.extracted_profile_json` (overwrite the profile key, keep sidecar for source quotes)
+- "Approve" button flips `review_status: pending → approved`; "Push to Dashboard" button is the Stage 4b addition
+- Mirror the Dashboard's `BrandProfileStep.tsx` field ordering so Josh has the same mental model across both systems
+
+### Key design notes for Initiative 2 Fit Score
+
+- New file `tkbs-crm/server/services/fit-score.js`
+- Input: a deal + its company record + any `acq_marketing_signals` data
+- Output: `{ score: 0-100, breakdown: { icp_match, readiness_signals, engagement }, flags: [ids of green/red flags hit] }`
+- Weights + flag definitions come from `server/config/icp.json` — do NOT hardcode
+- Compute on deal creation, store in new `deals.fit_score` column (needs migration)
+- Display on PipelineCard: small badge with color ramp (green 70+, yellow 40-70, red <40)
+- Don't build the scatter chart yet — one step at a time

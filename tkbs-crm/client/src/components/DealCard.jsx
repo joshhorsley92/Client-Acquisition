@@ -1,10 +1,36 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
+function fitBadgeStyle(score) {
+  if (score == null) {
+    return { bg: '#F7F8FA', color: '#94a3b8', border: '#E2E6EB', label: '—', tier: '' };
+  }
+  if (score >= 70) return { bg: '#E6FAF5', color: '#00D4AA', border: '#00D4AA', label: String(score), tier: 'High fit' };
+  if (score >= 40) return { bg: '#FFF3E0', color: '#E6A817', border: '#E6A817', label: String(score), tier: 'Mid fit' };
+  return { bg: '#FEE2E2', color: '#dc2626', border: '#dc2626', label: String(score), tier: 'Low fit' };
+}
+
+function fitTooltip(deal) {
+  if (deal.fit_score == null) return 'Fit score not yet computed';
+  let tier = 'Low fit';
+  if (deal.fit_score >= 70) tier = 'High fit';
+  else if (deal.fit_score >= 40) tier = 'Mid fit';
+  try {
+    const raw = deal.fit_score_breakdown;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const b = parsed && (parsed.breakdown || parsed);
+    if (b && b.icp_match && b.readiness_signals && b.engagement) {
+      return `${tier} · ICP ${b.icp_match.score}/${b.icp_match.max} · Readiness ${b.readiness_signals.score}/${b.readiness_signals.max} · Engagement ${b.engagement.score}/${b.engagement.max}`;
+    }
+  } catch (e) {}
+  return `${tier} · ${deal.fit_score}/100`;
+}
+
 export default function DealCard({ deal, provided }) {
   const navigate = useNavigate();
   const daysInStage = Math.floor((Date.now() - new Date(deal.stage_entered_at).getTime()) / 86400000);
   const isStale = daysInStage > 21;
+  const fit = fitBadgeStyle(deal.fit_score);
 
   return (
     <div
@@ -23,8 +49,20 @@ export default function DealCard({ deal, provided }) {
         ...provided.draggableProps.style,
       }}
     >
-      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-        {deal.company_name || 'No Company'}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {deal.company_name || 'No Company'}
+        </div>
+        <span
+          title={fitTooltip(deal)}
+          style={{
+            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+            background: fit.bg, color: fit.color, border: `1px solid ${fit.border}`,
+            flexShrink: 0, lineHeight: '14px',
+          }}
+        >
+          {fit.label}
+        </span>
       </div>
       <div style={{ fontSize: 12, color: '#64748B', marginBottom: 6 }}>
         {deal.contact_name || 'No Contact'}

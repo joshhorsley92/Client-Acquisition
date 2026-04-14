@@ -29,6 +29,7 @@ export default function Pipeline() {
   const [companies, setCompanies] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('recent');
 
   const loadDeals = async () => {
     try {
@@ -50,7 +51,25 @@ export default function Pipeline() {
     }
   }, [showNewDeal]);
 
-  const dealsByStage = (stageId) => deals.filter((d) => d.stage === stageId);
+  const sortDeals = (list) => {
+    const arr = list.slice();
+    if (sortBy === 'value_desc') {
+      arr.sort((a, b) => (Number(b.estimated_value) || 0) - (Number(a.estimated_value) || 0));
+    } else if (sortBy === 'fit_desc') {
+      arr.sort((a, b) => {
+        const aNull = a.fit_score == null;
+        const bNull = b.fit_score == null;
+        if (aNull && bNull) return 0;
+        if (aNull) return 1; // nulls to bottom
+        if (bNull) return -1;
+        return b.fit_score - a.fit_score;
+      });
+    }
+    // 'recent' — leave in list order (API returns ORDER BY created_at DESC)
+    return arr;
+  };
+
+  const dealsByStage = (stageId) => sortDeals(deals.filter((d) => d.stage === stageId));
 
   const onDragEnd = async (result) => {
     if (!result.destination) return;
@@ -106,15 +125,30 @@ export default function Pipeline() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>Pipeline</h1>
-        <button
-          onClick={() => setShowNewDeal(true)}
-          style={{
-            background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
-            padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-          }}
-        >
-          + New Deal
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ fontSize: 12, color: '#64748B' }}>Sort:</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{
+              padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
+              fontSize: 14, background: '#fff', color: '#1B2838', cursor: 'pointer',
+            }}
+          >
+            <option value="recent">Recent</option>
+            <option value="value_desc">Value (high &rarr; low)</option>
+            <option value="fit_desc">Fit score (high &rarr; low)</option>
+          </select>
+          <button
+            onClick={() => setShowNewDeal(true)}
+            style={{
+              background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
+              padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            }}
+          >
+            + New Deal
+          </button>
+        </div>
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>

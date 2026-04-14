@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { executeStageActions } = require('../services/stage-actions');
 const { runTrackedJob, isCliAvailable } = require('../services/claude-cli');
 const { buildPrompt, getPromptTypesForStage } = require('../services/ai-prompts');
+const { scoreDeal } = require('../services/fit-score');
 
 router.use(requireAuth);
 
@@ -47,6 +48,18 @@ router.get('/:id', (req, res) => {
   const tasks = req.db.prepare('SELECT * FROM tasks WHERE deal_id = ? ORDER BY due_at ASC').all(deal.id);
   const documents = req.db.prepare('SELECT * FROM documents WHERE deal_id = ? ORDER BY created_at DESC').all(deal.id);
 
+  // Lazy fit-score compute (on-demand, cached thereafter)
+  if (deal.fit_score == null) {
+    try {
+      const result = scoreDeal(req.db, deal.id);
+      deal.fit_score = result.score;
+      deal.fit_score_breakdown = JSON.stringify({ breakdown: result.breakdown, flags: result.flags });
+      try { req.audit('fit_score_computed', 'deal', deal.id, { score: result.score }); } catch (e) {}
+    } catch (e) {
+      // Non-fatal — return deal without score
+    }
+  }
+
   res.json({ deal, company, contact, tasks, documents });
 });
 
@@ -74,7 +87,21 @@ router.post('/', (req, res) => {
     executeStageActions(req.db, deal.id, dealStage, req.user.id);
   } catch (e) {}
 
-  res.status(201).json({ deal });
+  // Initial fit-score compute (best-effort — failures must not block deal creation)
+  let fit_score = null;
+  let fit_score_breakdown = null;
+  try {
+    const result2 = scoreDeal(req.db, deal.id);
+    fit_score = result2.score;
+    fit_score_breakdown = { breakdown: result2.breakdown, flags: result2.flags };
+    deal.fit_score = result2.score;
+    deal.fit_score_breakdown = JSON.stringify(fit_score_breakdown);
+    try { req.audit('fit_score_computed', 'deal', deal.id, { score: result2.score }); } catch (e) {}
+  } catch (e) {
+    console.error('Fit score compute failed for deal', deal.id, e.message);
+  }
+
+  res.status(201).json({ deal, fit_score, fit_score_breakdown });
 });
 
 router.patch('/:id', (req, res) => {
@@ -140,6 +167,20 @@ router.patch('/:id', (req, res) => {
 
   const deal = req.db.prepare('SELECT * FROM deals WHERE id = ?').get(req.params.id);
   res.json({ deal });
+});
+
+// POST /api/deals/:id/fit-score/recompute — forces fresh computation
+router.post('/:id/fit-score/recompute', (req, res) => {
+  const deal = req.db.prepare('SELECT id FROM deals WHERE id = ?').get(req.params.id);
+  if (!deal) return res.status(404).json({ error: 'Deal not found' });
+
+  try {
+    const result = scoreDeal(req.db, deal.id);
+    try { req.audit('fit_score_computed', 'deal', deal.id, { score: result.score }); } catch (e) {}
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Fit score computation failed' });
+  }
 });
 
 // GET /api/deals/:id/generation-status

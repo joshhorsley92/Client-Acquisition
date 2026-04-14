@@ -26,6 +26,8 @@ function initDb() {
   try { database.exec('ALTER TABLE tasks ADD COLUMN notes TEXT'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN fit_score INTEGER'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN fit_score_breakdown TEXT'); } catch(e) { /* already exists */ }
 
   // Add prospect stage action if missing (running DB migration)
   try {
