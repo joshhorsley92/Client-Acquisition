@@ -324,7 +324,58 @@ The Dashboard stays on public internet (Supabase cloud) because it's meant to be
 
 ---
 
-## 10. Current status (updated 2026-04-12 — end of day 2)
+## 10. Current status (updated 2026-04-13 — end of day 3)
+
+### Day 3 progress
+
+| Task | Commit | Status |
+|------|--------|--------|
+| Initiative 1 Stage 4a: editable Brand Profile review UI | CRM `efb09f4` | ✅ Live (BrandProfileEditor component, source-quote popovers, keep/reject, re-extract modal) |
+| Initiative 2 Fit Score engine | CRM `6a0478c` | ✅ Live (108/108 Node tests passing, lazy compute, badge on DealCard, sort dropdown) |
+| Wren & Ivy ideal-client seed | CRM `11d21fb` | ✅ Reproducible, hits exactly 80/100 Fit Score, creates both admin accounts |
+| Stage 4b/5 architecture decisions captured | memory + plan | ✅ All 9 clarifying questions answered (2026-04-13) |
+| Stage 4b Phase 1 — Dashboard endpoints | Dashboard PR #1 merged to main (`a9a6bb3`) | ✅ 4 endpoints live at `/api/crm/*` on `joshhorsley92/TKBS_CustomerDashboards` |
+
+### Pick-up point for tomorrow
+
+**Phase 1 of Stage 4b is done — the Dashboard now exposes the endpoints the CRM needs.** Before building Phase 3 (CRM side), Joe must complete two prerequisites:
+
+1. **Generate `CRM_SERVICE_KEY`** — `openssl rand -hex 32` (or any strong random string)
+2. **Set env vars on both sides:**
+   - **Vercel (Dashboard prod):** `CRM_SERVICE_KEY=<the key>`, confirm `NEXT_PUBLIC_APP_URL` is set (e.g. `https://dashboard.turnkeymarketing.com`)
+   - **CRM local `.env`:** `DASHBOARD_SERVICE_KEY=<same key>`, `DASHBOARD_API_URL=<Dashboard public URL>`
+
+### Phases ahead
+
+**Phase 3 — CRM side (1-2 days, no blockers once env vars are set):**
+- `tkbs-crm/server/services/dashboard-client.js` — fetch wrapper with retry + auth header
+- `POST /api/calls/:id/push-to-dashboard` endpoint — orchestrates find-or-create prospect + push Brand Profile
+- New columns: `call_recordings.dashboard_org_id`, `deals.dashboard_org_id`, `deals.launch_client_id`, `deals.launch_activated_at`
+- CallDetail UI — "Push to Dashboard" button replaces the Stage 4b placeholder. Post-push → "Open on Dashboard ↗" link using `portal_url`
+- Audit logging on push
+
+**Phase 4 — Stage 5 closed-won handler (0.5 day):**
+- New `activate_launch_on_dashboard` action_type in `tkbs-crm/server/services/stage-actions.js`
+- Reads target tier from `deal.package_type` (launch or boost)
+- Safety net: if push_to_dashboard hasn't happened yet, does it first
+- Never blocks the stage transition — logs warning, flags deal for retry (per Joe's 2026-04-13 decision)
+- Python `crm_bridge.py` safely ignores the new action_type (same pattern as pre-unstub trigger_skill)
+
+**Phase 5 — End-to-end test (0.5 day):**
+- Use existing Wren & Ivy seed deal with email `test@tkbsmarketing.com`
+- Push → verify user + org + brand_profile appear on Dashboard
+- Move deal to Closed Won → verify tier upgrade + launch_clients creation
+- Clean up test user when done
+
+### Still deferred
+
+- Initiative 1 Stage 2 (Whisper transcription) — manual paste only for now
+- Initiative 3 Tailscale/Caddy deployment — per-developer local SQLite still the norm
+- Nightly CRM↔Dashboard sync — follow-on feature after Stage 4b core ships
+
+---
+
+## 10-OLD. Historical status (2026-04-12 — end of day 2)
 
 ### Shipped and committed
 
