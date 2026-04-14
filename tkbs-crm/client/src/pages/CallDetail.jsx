@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import BrandProfileEditor from '../components/BrandProfileEditor';
 
 function formatDate(ts) {
   if (!ts) return '—';
@@ -15,135 +16,55 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Compact read-only preview of the extracted Brand Profile in the sidebar.
-// Full editing UI comes in Stage 4 (Review & approve).
-function ExtractionPreview({ profile, sidecar }) {
-  if (!profile) return null;
+// Minimum required fields per the Dashboard schema.
+function computeCompletion(profile) {
+  if (!profile) return 0;
+  const checks = [
+    !!profile.business_name,
+    !!profile.industry,
+    !!profile.customer_avatar?.name,
+    (profile.customer_avatar?.pain_points?.length || 0) > 0,
+    (profile.brand_personality?.traits?.length || 0) > 0,
+    !!profile.visual_identity?.primary_color,
+    (profile.brand_voice?.tone?.length || 0) > 0,
+  ];
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+}
 
-  const scalarField = (label, value, path) => {
-    const side = sidecar?.[path];
-    const hasValue = value !== null && value !== undefined && value !== '';
-    return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, marginBottom: 2 }}>{label}</div>
-        <div style={{ fontSize: 12, color: hasValue ? '#1B2838' : '#94a3b8' }}>
-          {hasValue ? value : '—'}
-          {side?.confidence != null && hasValue && (
-            <span style={{ marginLeft: 6, color: '#94a3b8', fontSize: 10 }}>
-              ({Math.round(side.confidence * 100)}%)
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const arrayField = (label, value) => {
-    const items = Array.isArray(value) ? value : [];
-    return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, marginBottom: 2 }}>{label}</div>
-        {items.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#94a3b8' }}>—</div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {items.map((item, i) => (
-              <span key={i} style={{
-                fontSize: 11, padding: '2px 8px', borderRadius: 10,
-                background: '#F7F8FA', color: '#1B2838', border: '1px solid #E2E6EB',
-              }}>
-                {item}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const section = (title, children) => (
-    <details style={{ marginBottom: 12 }} open>
-      <summary style={{
-        fontSize: 12, fontWeight: 700, color: '#1B2838', cursor: 'pointer',
-        padding: '6px 0', borderBottom: '1px solid #F7F8FA', marginBottom: 8,
-      }}>
-        {title}
-      </summary>
-      <div style={{ paddingLeft: 4 }}>{children}</div>
-    </details>
-  );
-
-  return (
-    <div>
-      {section('Business Identity', (
-        <>
-          {scalarField('Business name', profile.business_name, 'business_name')}
-          {scalarField('Industry', profile.industry, 'industry')}
-          {scalarField('Description', profile.business_description, 'business_description')}
-          {scalarField('Website', profile.website_url, 'website_url')}
-          {scalarField('Location', [profile.location_city, profile.location_state].filter(Boolean).join(', '), 'location_city')}
-          {scalarField('Years in business', profile.years_in_business, 'years_in_business')}
-        </>
-      ))}
-
-      {section('Customer Avatar', (
-        <>
-          {scalarField('Name', profile.customer_avatar?.name, 'customer_avatar.name')}
-          {scalarField('Age range', profile.customer_avatar?.age_range, 'customer_avatar.age_range')}
-          {scalarField('Occupation', profile.customer_avatar?.occupation, 'customer_avatar.occupation')}
-          {arrayField('Pain points', profile.customer_avatar?.pain_points)}
-          {arrayField('Goals', profile.customer_avatar?.goals)}
-          {arrayField('Objections', profile.customer_avatar?.objections)}
-        </>
-      ))}
-
-      {section('Brand Personality', (
-        <>
-          {arrayField('Traits', profile.brand_personality?.traits)}
-          {scalarField('Mood', profile.brand_personality?.mood, 'brand_personality.mood')}
-          {scalarField('Formality', profile.brand_personality?.formality_level, 'brand_personality.formality_level')}
-        </>
-      ))}
-
-      {section('Visual Identity', (
-        <>
-          {scalarField('Primary color', profile.visual_identity?.primary_color, 'visual_identity.primary_color')}
-          {scalarField('Heading font', profile.visual_identity?.heading_font, 'visual_identity.heading_font')}
-          {arrayField('Style keywords', profile.visual_identity?.style_keywords)}
-        </>
-      ))}
-
-      {section('Brand Voice', (
-        <>
-          {arrayField('Tone', profile.brand_voice?.tone)}
-          {arrayField('Do', profile.brand_voice?.dos)}
-          {arrayField("Don't", profile.brand_voice?.donts)}
-          {scalarField('Tagline', profile.brand_voice?.tagline, 'brand_voice.tagline')}
-        </>
-      ))}
-    </div>
-  );
+function deepEqual(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 export default function CallDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [call, setCall] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Editable fields
+  // Transcript + notes
   const [transcript, setTranscript] = useState('');
   const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [savingTranscript, setSavingTranscript] = useState(false);
   const [savedMessage, setSavedMessage] = useState('');
-  const [dirty, setDirty] = useState(false);
+  const [transcriptDirty, setTranscriptDirty] = useState(false);
 
-  // Brand Profile extraction
+  // Brand Profile extraction state
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState('');
-  const [extraction, setExtraction] = useState(null);
+  const [extraction, setExtraction] = useState(null); // full payload from server
+  const [originalProfile, setOriginalProfile] = useState(null); // for dirty detection
+  const [editedProfile, setEditedProfile] = useState(null);
+  const [editedFieldsSet, setEditedFieldsSet] = useState([]);
+  const [excludedFields, setExcludedFields] = useState([]);
 
+  // Re-extract confirmation modal
+  const [confirmReExtract, setConfirmReExtract] = useState(false);
+
+  // Save/approve state
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  // Load call
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -153,34 +74,82 @@ export default function CallDetail() {
         setCall(d.call);
         setTranscript(d.call.transcript || '');
         setNotes(d.call.notes || '');
-        setDirty(false);
-        // Parse cached extraction if present
-        if (d.call.extracted_profile_json) {
-          try {
-            setExtraction(JSON.parse(d.call.extracted_profile_json));
-          } catch { /* ignore parse errors */ }
-        } else {
-          setExtraction(null);
-        }
+        setTranscriptDirty(false);
+        loadExtractionFromCall(d.call);
       })
       .catch((err) => setError(err.message || 'Failed to load call'))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [id]);
 
-  const extractBrandProfile = async () => {
+  function loadExtractionFromCall(callRow) {
+    if (!callRow?.extracted_profile_json) {
+      setExtraction(null);
+      setOriginalProfile(null);
+      setEditedProfile(null);
+      setEditedFieldsSet([]);
+      setExcludedFields([]);
+      return;
+    }
+    try {
+      const payload = JSON.parse(callRow.extracted_profile_json);
+      setExtraction(payload);
+      setOriginalProfile(payload.profile || null);
+      setEditedProfile(payload.profile ? JSON.parse(JSON.stringify(payload.profile)) : null);
+      setEditedFieldsSet(payload.edited_fields || []);
+      setExcludedFields(payload.excluded_fields || []);
+    } catch { /* ignore */ }
+  }
+
+  const profileDirty = useMemo(() => {
+    if (!editedProfile || !originalProfile) return false;
+    if (!deepEqual(editedProfile, originalProfile)) return true;
+    const storedEdited = extraction?.edited_fields || [];
+    const storedExcluded = extraction?.excluded_fields || [];
+    return !deepEqual(editedFieldsSet, storedEdited) || !deepEqual(excludedFields, storedExcluded);
+  }, [editedProfile, originalProfile, editedFieldsSet, excludedFields, extraction]);
+
+  const liveCompletion = useMemo(() => {
+    // Only count non-excluded fields toward completion — matches what will push
+    if (!editedProfile) return 0;
+    // For simplicity, completion calc uses the raw profile regardless of exclusion;
+    // exclusion is about what gets pushed, not about how "complete" it looks.
+    return computeCompletion(editedProfile);
+  }, [editedProfile]);
+
+  const isApproved = call?.review_status === 'approved' && !profileDirty;
+
+  const saveTranscript = async () => {
+    setSavingTranscript(true); setSavedMessage('');
+    try {
+      const updated = await api.updateCall(id, { transcript, notes });
+      setCall(updated.call);
+      setTranscriptDirty(false);
+      setSavedMessage('Saved');
+      setTimeout(() => setSavedMessage(''), 2000);
+    } catch (err) {
+      setError(err.message || 'Save failed');
+    } finally {
+      setSavingTranscript(false);
+    }
+  };
+
+  const runExtraction = async () => {
     setExtractError(''); setExtracting(true);
     try {
-      // If the user has unsaved transcript edits, save first so extraction uses them
-      if (dirty) {
+      if (transcriptDirty) {
         await api.updateCall(id, { transcript, notes });
-        setDirty(false);
+        setTranscriptDirty(false);
       }
       const { extraction: result } = await api.extractBrandProfile(id);
-      setExtraction(result);
-      // Refresh call to pick up review_status change
       const fresh = await api.getCall(id);
       setCall(fresh.call);
+      // Re-extraction always resets edits/exclusions — this is the overwrite path
+      setExtraction(result);
+      setOriginalProfile(result.profile || null);
+      setEditedProfile(result.profile ? JSON.parse(JSON.stringify(result.profile)) : null);
+      setEditedFieldsSet([]);
+      setExcludedFields([]);
     } catch (err) {
       setExtractError(err.message || 'Extraction failed');
     } finally {
@@ -188,18 +157,77 @@ export default function CallDetail() {
     }
   };
 
-  const save = async () => {
-    setSaving(true); setSavedMessage('');
+  const handleExtractClick = () => {
+    // If there's already an extraction (even if unedited), confirm before overwriting.
+    if (extraction) {
+      setConfirmReExtract(true);
+    } else {
+      runExtraction();
+    }
+  };
+
+  const handleProfileChange = (newProfile, changedPath, newExcluded) => {
+    if (newProfile !== undefined) setEditedProfile(newProfile);
+    if (newExcluded !== undefined) setExcludedFields(newExcluded);
+    if (changedPath && !editedFieldsSet.includes(changedPath)) {
+      setEditedFieldsSet([...editedFieldsSet, changedPath]);
+    }
+  };
+
+  const saveProfile = async () => {
+    setProfileError(''); setSavingProfile(true);
     try {
-      const updated = await api.updateCall(id, { transcript, notes });
+      const payload = {
+        ...extraction,
+        profile: editedProfile,
+        edited_fields: editedFieldsSet,
+        excluded_fields: excludedFields,
+        completion_percent: liveCompletion,
+      };
+      // If user edited anything after approval, clear the approval timestamp
+      if (profileDirty && extraction?.reviewed_at) {
+        payload.reviewed_at = null;
+        payload.reviewed_by = null;
+      }
+      const updated = await api.updateCall(id, {
+        extracted_profile_json: JSON.stringify(payload),
+        // Demote back to pending if user edits an approved profile
+        review_status: call?.review_status === 'approved' ? 'pending' : call?.review_status,
+      });
       setCall(updated.call);
-      setDirty(false);
-      setSavedMessage('Saved');
+      loadExtractionFromCall(updated.call);
+      setSavedMessage('Changes saved');
       setTimeout(() => setSavedMessage(''), 2000);
     } catch (err) {
-      setError(err.message || 'Save failed');
+      setProfileError(err.message || 'Save failed');
     } finally {
-      setSaving(false);
+      setSavingProfile(false);
+    }
+  };
+
+  const approveProfile = async () => {
+    setProfileError(''); setSavingProfile(true);
+    try {
+      const payload = {
+        ...extraction,
+        profile: editedProfile,
+        edited_fields: editedFieldsSet,
+        excluded_fields: excludedFields,
+        completion_percent: liveCompletion,
+        reviewed_at: new Date().toISOString(),
+      };
+      const updated = await api.updateCall(id, {
+        extracted_profile_json: JSON.stringify(payload),
+        review_status: 'approved',
+      });
+      setCall(updated.call);
+      loadExtractionFromCall(updated.call);
+      setSavedMessage('Approved — ready for Dashboard push (coming in Stage 4b)');
+      setTimeout(() => setSavedMessage(''), 3000);
+    } catch (err) {
+      setProfileError(err.message || 'Approve failed');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -254,8 +282,8 @@ export default function CallDetail() {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
-        {/* Transcript */}
+      {/* Top row: transcript + sidebar (audio + extraction trigger) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 20 }}>
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Transcript</h3>
@@ -267,9 +295,9 @@ export default function CallDetail() {
 
           <textarea
             value={transcript}
-            onChange={(e) => { setTranscript(e.target.value); setDirty(true); }}
+            onChange={(e) => { setTranscript(e.target.value); setTranscriptDirty(true); }}
             placeholder="No transcript yet. Paste one here, or wait for Whisper auto-transcription (coming soon)."
-            rows={20}
+            rows={18}
             style={{
               width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
               borderRadius: 4, fontSize: 13, fontFamily: 'inherit',
@@ -281,8 +309,8 @@ export default function CallDetail() {
             <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
             <textarea
               value={notes}
-              onChange={(e) => { setNotes(e.target.value); setDirty(true); }}
-              rows={3}
+              onChange={(e) => { setNotes(e.target.value); setTranscriptDirty(true); }}
+              rows={2}
               style={{
                 width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
                 borderRadius: 4, fontSize: 13, fontFamily: 'inherit',
@@ -293,26 +321,26 @@ export default function CallDetail() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <button
-              onClick={save} disabled={!dirty || saving}
+              onClick={saveTranscript} disabled={!transcriptDirty || savingTranscript}
               style={{
                 padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
                 border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
-                cursor: (!dirty || saving) ? 'not-allowed' : 'pointer',
-                opacity: (!dirty || saving) ? 0.6 : 1,
+                cursor: (!transcriptDirty || savingTranscript) ? 'not-allowed' : 'pointer',
+                opacity: (!transcriptDirty || savingTranscript) ? 0.6 : 1,
               }}
             >
-              {saving ? 'Saving…' : 'Save changes'}
+              {savingTranscript ? 'Saving…' : 'Save transcript'}
             </button>
             {savedMessage && (
               <span style={{ fontSize: 12, color: '#00D4AA', fontWeight: 600 }}>{savedMessage}</span>
             )}
-            {dirty && !savedMessage && (
+            {transcriptDirty && !savedMessage && (
               <span style={{ fontSize: 12, color: '#64748B' }}>Unsaved changes</span>
             )}
           </div>
         </div>
 
-        {/* Sidebar — audio + metadata */}
+        {/* Sidebar */}
         <div>
           <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16, marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Audio</h3>
@@ -325,22 +353,15 @@ export default function CallDetail() {
                 <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>
                   {formatFileSize(call.audio_size_bytes)}
                 </div>
-                <audio
-                  controls
-                  src={`/api/calls/${call.id}/audio`}
-                  style={{ width: '100%', marginBottom: 8 }}
-                />
+                <audio controls src={`/api/calls/${call.id}/audio`} style={{ width: '100%', marginBottom: 8 }} />
                 <a
-                  href={`/api/calls/${call.id}/audio`}
-                  download
+                  href={`/api/calls/${call.id}/audio`} download
                   style={{
                     display: 'inline-block', padding: '6px 12px', background: '#fff',
                     color: '#1B2838', border: '1px solid #E2E6EB', borderRadius: 4,
                     fontSize: 12, fontWeight: 600, textDecoration: 'none',
                   }}
-                >
-                  Download
-                </a>
+                >Download</a>
               </>
             ) : (
               <div style={{ fontSize: 13, color: '#94a3b8' }}>No audio file attached.</div>
@@ -354,9 +375,7 @@ export default function CallDetail() {
               <div style={{
                 background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817',
                 padding: '6px 10px', borderRadius: 4, fontSize: 12, marginBottom: 10,
-              }}>
-                {extractError}
-              </div>
+              }}>{extractError}</div>
             )}
 
             {!extraction && !transcript.trim() && (
@@ -365,23 +384,14 @@ export default function CallDetail() {
               </div>
             )}
 
-            {!extraction && transcript.trim() && (
-              <div style={{ fontSize: 12, color: '#64748B', marginBottom: 10, lineHeight: 1.5 }}>
-                Claude will read the transcript and extract a Brand Profile matching the TKBS Dashboard schema.
-              </div>
-            )}
-
             {extraction && (
               <div style={{ marginBottom: 10 }}>
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  marginBottom: 8,
-                }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <span style={{
                     fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
                     background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA',
                   }}>
-                    {extraction.completion_percent}% complete
+                    {liveCompletion}% complete
                   </span>
                   <span style={{ fontSize: 11, color: '#94a3b8' }}>
                     {extraction.model?.split('-').slice(0, 3).join('-') || 'Claude'}
@@ -389,13 +399,23 @@ export default function CallDetail() {
                 </div>
                 <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
                   Extracted {formatDate(extraction.extracted_at)}
-                  {extraction.usage && ` · ${extraction.usage.input_tokens?.toLocaleString()} in / ${extraction.usage.output_tokens?.toLocaleString()} out tokens`}
+                  {extraction.usage && ` · ${extraction.usage.input_tokens?.toLocaleString()} in / ${extraction.usage.output_tokens?.toLocaleString()} out`}
+                </div>
+
+                <div style={{
+                  fontSize: 11, padding: '4px 10px', borderRadius: 10, fontWeight: 600,
+                  display: 'inline-block',
+                  background: isApproved ? '#E6FAF5' : call?.review_status === 'pending' ? '#FFF3E0' : '#F7F8FA',
+                  color: isApproved ? '#00D4AA' : call?.review_status === 'pending' ? '#E6A817' : '#94a3b8',
+                  border: `1px solid ${isApproved ? '#00D4AA' : call?.review_status === 'pending' ? '#E6A817' : '#E2E6EB'}`,
+                }}>
+                  {isApproved ? 'Approved' : call?.review_status === 'pending' ? 'Pending review' : 'Not reviewed'}
                 </div>
               </div>
             )}
 
             <button
-              onClick={extractBrandProfile}
+              onClick={handleExtractClick}
               disabled={extracting || !transcript.trim()}
               style={{
                 width: '100%', padding: '8px 12px',
@@ -409,21 +429,7 @@ export default function CallDetail() {
             >
               {extracting ? 'Extracting…' : extraction ? 'Re-extract' : '✨ Extract Brand Profile'}
             </button>
-
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
-              Review UI for editing + pushing to Dashboard is the next stage.
-            </div>
           </div>
-
-          {extraction && (
-            <div style={{
-              background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8,
-              padding: 16, marginBottom: 16,
-            }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Extracted fields</h3>
-              <ExtractionPreview profile={extraction.profile} sidecar={extraction.sidecar} />
-            </div>
-          )}
 
           <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Metadata</h3>
@@ -431,6 +437,9 @@ export default function CallDetail() {
               <div><strong style={{ color: '#1B2838', fontWeight: 600 }}>Created:</strong> {formatDate(call.created_at)}</div>
               <div><strong style={{ color: '#1B2838', fontWeight: 600 }}>Updated:</strong> {formatDate(call.updated_at)}</div>
               <div><strong style={{ color: '#1B2838', fontWeight: 600 }}>Review:</strong> {call.review_status}</div>
+              {extraction?.reviewed_at && (
+                <div><strong style={{ color: '#1B2838', fontWeight: 600 }}>Approved:</strong> {formatDate(extraction.reviewed_at)}</div>
+              )}
               {call.pushed_to_dashboard_at && (
                 <div><strong style={{ color: '#1B2838', fontWeight: 600 }}>Pushed:</strong> {formatDate(call.pushed_to_dashboard_at)}</div>
               )}
@@ -438,6 +447,116 @@ export default function CallDetail() {
           </div>
         </div>
       </div>
+
+      {/* Full-width Brand Profile editor */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 12,
+        }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Brand Profile</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {profileError && (
+              <span style={{ fontSize: 12, color: '#dc2626' }}>{profileError}</span>
+            )}
+            {profileDirty && (
+              <span style={{ fontSize: 12, color: '#E6A817', fontWeight: 600 }}>
+                Unsaved changes {isApproved ? '' : ''}
+              </span>
+            )}
+            {isApproved && !profileDirty && (
+              <span style={{
+                fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA',
+              }}>
+                ✓ Approved
+              </span>
+            )}
+
+            {extraction && (
+              <>
+                <button
+                  onClick={saveProfile}
+                  disabled={!profileDirty || savingProfile}
+                  style={{
+                    padding: '8px 16px', background: '#fff', color: '#1B2838',
+                    border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13,
+                    fontWeight: 600,
+                    cursor: (!profileDirty || savingProfile) ? 'not-allowed' : 'pointer',
+                    opacity: (!profileDirty || savingProfile) ? 0.6 : 1,
+                  }}
+                >
+                  {savingProfile ? 'Saving…' : 'Save changes'}
+                </button>
+                <button
+                  onClick={approveProfile}
+                  disabled={savingProfile || isApproved}
+                  style={{
+                    padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
+                    border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                    cursor: (savingProfile || isApproved) ? 'not-allowed' : 'pointer',
+                    opacity: (savingProfile || isApproved) ? 0.6 : 1,
+                  }}
+                >
+                  {isApproved ? 'Approved ✓' : 'Approve & mark ready'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <BrandProfileEditor
+          profile={editedProfile}
+          sidecar={extraction?.sidecar}
+          excludedFields={excludedFields}
+          onChange={handleProfileChange}
+          disabled={savingProfile}
+        />
+      </div>
+
+      {/* Re-extract confirmation modal */}
+      {confirmReExtract && (
+        <div
+          onClick={() => setConfirmReExtract(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 8, padding: 24, width: 440,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            }}
+          >
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 12px 0' }}>Re-extract Brand Profile?</h3>
+            <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              {profileDirty
+                ? 'This will replace your edits with a fresh Claude extraction. Your current changes will be lost.'
+                : 'This will overwrite the existing extraction with a fresh one. Rejected fields and prior approvals will also be reset.'}
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setConfirmReExtract(false)}
+                style={{
+                  padding: '8px 16px', background: '#fff', color: '#1B2838',
+                  border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >Cancel</button>
+              <button
+                onClick={() => { setConfirmReExtract(false); runExtraction(); }}
+                style={{
+                  padding: '8px 16px', background: '#E6A817', color: '#fff',
+                  border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >Re-extract anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

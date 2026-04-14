@@ -129,7 +129,7 @@ router.patch('/:id', (req, res) => {
 
   const updates = [];
   const values = [];
-  const allowed = ['call_date', 'duration_minutes', 'transcript', 'transcript_source', 'notes', 'contact_id', 'review_status'];
+  const allowed = ['call_date', 'duration_minutes', 'transcript', 'transcript_source', 'notes', 'contact_id', 'review_status', 'extracted_profile_json'];
   for (const field of allowed) {
     if (req.body[field] !== undefined) {
       updates.push(`${field} = ?`);
