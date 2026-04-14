@@ -51,6 +51,30 @@ python main.py stats
 pytest -v
 ```
 
+## CRM web app setup
+
+The `tkbs-crm/` directory is a full Node/Express + React CRM sharing the same SQLite database. First-time setup:
+
+```bash
+cd tkbs-crm
+npm install          # root-level deps (server + jest)
+cd client && npm install && cd ..   # vite + react deps
+cp .env.example .env                 # add ANTHROPIC_API_KEY + SESSION_SECRET
+npm run dev                          # starts server (:3001) + client (:5173)
+```
+
+Seed admin accounts + the Wren & Ivy demo deal (idempotent, safe to re-run):
+
+```bash
+node scripts/seed-wren-ivy.js
+```
+
+Default logins (change password on first login):
+- `joe@tkbsmarketing.com` / `changeme`
+- `josh@tkbsmarketing.com` / `changeme`
+
+> **Note:** each developer runs their own local CRM against their own `tkbs-crm.db`. You do NOT see each other's deals in real time. Shared multi-user access requires either a Tailscale deployment (Initiative 3) or the eventual Supabase migration. Until then, the seed script keeps both local DBs showing the same reference data.
+
 ## Architecture
 
 - **scrapers/** — Etsy, Kickstarter, and Michigan county registry scrapers
@@ -58,3 +82,4 @@ pytest -v
 - **outreach/** — Personalized DOCX mailer and HTML email generator with QR codes
 - **database/** — SQLite database layer (shared with TKBS CRM)
 - **main.py** — Click CLI entry point
+- **tkbs-crm/** — Node/Express + React CRM, sessions + MFA + audit log + Fit Score + call recordings
