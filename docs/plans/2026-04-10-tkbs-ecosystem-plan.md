@@ -324,7 +324,46 @@ The Dashboard stays on public internet (Supabase cloud) because it's meant to be
 
 ---
 
-## 10. Current status (updated 2026-04-13 — end of day 3)
+## 10. Current status (updated 2026-04-14 — end of day 4)
+
+### 🎉 Initiative 1 functionally complete
+
+Today shipped Stage 4b (CRM→Dashboard push) and Stage 5 (Closed Won → Launch activation). Smoke-tested end-to-end against Joe's live Dashboard (local Next.js → prod Supabase) using the Wren & Ivy seed deal. Push worked, portal link opened the right org, drag to Closed Won fired the activation, tier upgraded prospect→launch, launch_client row created. All 108/108 tests still passing.
+
+### Day 4 commits
+
+| Commit | Content |
+|---|---|
+| Dashboard `a9a6bb3` | (yesterday) PR #1 merged — `/api/crm/*` endpoints |
+| CRM `c254460` | Stage 4b + Stage 5 — dashboard-client.js, push endpoint, CallDetail UI, Stage 5 closed-won handler, schema migrations |
+
+### Initiative 1 final state
+
+| Stage | Status |
+|---|---|
+| 1 — Capture | ✅ |
+| 2 — Whisper transcription | ⏸ deferred (manual paste works) |
+| 3 — Claude extraction | ✅ |
+| 4a — Editable review UI | ✅ |
+| 4b — Push to Dashboard | ✅ |
+| 5 — Closed Won → Launch activation | ✅ |
+
+### Cleanup items (pending Joe)
+
+- **Test data on prod Supabase:** `megan@wrenandivyboutique.com` user + Wren & Ivy org + brand profile + launch_client row. Delete via Supabase console → Auth → Users (cascades).
+- **`ANTHROPIC_API_KEY`** in `c:/Client-Acquisition/tkbs-crm/.env` — got clobbered when adding Dashboard env vars. Restore for Brand Profile re-extraction to work.
+
+### Pickup for tomorrow — Joe wants A + B + C + D
+
+Joe explicitly said: "I look forward to doing A, B, C, and D" — meaning he wants all four directions on the table. Suggested ordering by leverage:
+
+1. **A — Initiative 2 finish** (highest near-term value): time tracking on tasks, effort-vs-value scatter chart, channel ROI. Completes the "help Josh prioritize his time" story. Builds on the Fit Score engine already shipped.
+2. **B — Nightly CRM↔Dashboard sync** (medium): retries failed pushes, pulls Dashboard engagement back to feed Fit Score's engagement bucket. Self-contained feature, ~1 day.
+3. **C — Whisper Stage 2** (medium): kills manual transcript paste. Requires OpenAI API key (~$0.006/min). Joe deferred this earlier — worth re-evaluating now that the rest of Initiative 1 works.
+4. **C2 — Tailscale deployment / Initiative 3** (medium-high): real multi-user access (Joe + Josh on the same CRM). Currently each runs a local SQLite. ~1-2 hours of infra work.
+5. **D — Something else from real use:** now that the core pipeline works, what hurts most when Joe + Josh actually try to use it for real prospects? Worth a 10-min reflection at session start tomorrow.
+
+**Pick-up point for tomorrow:** decide which of A/B/C/C2/D to start with, then go. All are independent — no architectural decisions blocking any of them.
 
 ### Day 3 progress
 
