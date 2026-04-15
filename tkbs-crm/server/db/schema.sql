@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS deals (
   objections_noted TEXT,
   lost_reason TEXT,
   owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  dashboard_user_id TEXT,
+  dashboard_org_id TEXT,
+  launch_client_id TEXT,
+  launch_activated_at TEXT,
   stage_entered_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -209,6 +213,7 @@ CREATE TABLE IF NOT EXISTS call_recordings (
   review_status TEXT NOT NULL DEFAULT 'none' CHECK(review_status IN ('none', 'pending', 'approved', 'rejected')),
   pushed_to_dashboard_at TEXT,
   dashboard_user_id TEXT,
+  dashboard_org_id TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

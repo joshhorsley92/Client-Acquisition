@@ -80,6 +80,7 @@ export const api = {
   updateCall: (id, body) => request(`/calls/${id}`, { method: 'PATCH', body }),
   deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
   extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
+  pushCallToDashboard: (id) => request(`/calls/${id}/push-to-dashboard`, { method: 'POST' }),
   // Create accepts FormData (multipart) since it may include an audio file.
   // Can't use the normal request() helper which assumes JSON.
   createCall: async (formData) => {

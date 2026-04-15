@@ -67,6 +67,16 @@ function executeStageActions(db, dealId, newStage, userId) {
         handleRecord(db, dealId, config);
         result.actions.push({ type: 'record' });
         break;
+
+      case 'activate_launch_on_dashboard': {
+        // Fire-and-forget: never block the stage transition on Dashboard I/O.
+        // If it fails, the deal is flagged for retry (launch_activated_at stays null).
+        activateLaunchOnDashboard(db, dealId, config).catch((err) => {
+          console.error(`activate_launch_on_dashboard failed for deal ${dealId}:`, err.message);
+        });
+        result.actions.push({ type: 'activate_launch_on_dashboard', started: true });
+        break;
+      }
     }
   }
 
@@ -147,6 +157,79 @@ function startCadence(db, dealId, config) {
 function handleRecord(db, dealId, config) {
   if (config.cancel_pending_tasks) {
     db.prepare("UPDATE tasks SET status = 'overdue' WHERE deal_id = ? AND status = 'pending'").run(dealId);
+  }
+}
+
+/**
+ * Closed-Won handler: upgrade the prospect's tier on the Dashboard and kick
+ * off the Launch program (creates a launch_clients row — Dashboard's own
+ * pipeline generates deliverables from there).
+ *
+ * Resilient by design:
+ *  - Never throws. Errors logged, deal flagged for manual retry by leaving
+ *    `launch_activated_at` null.
+ *  - If the Brand Profile hasn't been pushed yet (no dashboard_user_id), logs
+ *    a warning and bails — the user needs to push from CallDetail first.
+ *  - Reads target tier from `deal.package_type` ('launch' or 'boost'). Defaults
+ *    to 'launch' if missing or set to 'undecided'/'both'.
+ */
+async function activateLaunchOnDashboard(db, dealId, config) {
+  const dashboardClient = require('./dashboard-client');
+  if (!dashboardClient.isConfigured()) {
+    console.warn(`activate_launch skipped for deal ${dealId}: Dashboard integration not configured`);
+    return;
+  }
+
+  const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId);
+  if (!deal) return;
+
+  // Already activated? No-op.
+  if (deal.launch_activated_at) return;
+
+  // Need a Dashboard user ID to activate. If we don't have one, log and bail —
+  // the user needs to push the Brand Profile first from CallDetail.
+  if (!deal.dashboard_user_id) {
+    console.warn(
+      `activate_launch skipped for deal ${dealId}: no dashboard_user_id on deal. ` +
+      'Push the Brand Profile from /calls/:id first, then re-trigger.',
+    );
+    logActivity(db, dealId, 'note',
+      '⚠ Launch activation skipped — Brand Profile not yet pushed to Dashboard. Push it from the call detail page, then re-move to Closed Won.');
+    return;
+  }
+
+  // Map package_type → Dashboard tier. Only 'launch' and 'boost' map cleanly;
+  // 'both' and 'undecided' fall back to 'launch' as the safe default.
+  const tierMap = { launch: 'launch', boost: 'boost' };
+  const configuredTier = (config && config.tier) || null;
+  const resolvedTier = configuredTier || tierMap[deal.package_type] || 'launch';
+
+  const result = await dashboardClient.activateLaunch(deal.dashboard_user_id, resolvedTier);
+  if (!result.ok) {
+    console.warn(
+      `activate_launch failed for deal ${dealId}: ${result.error} (status ${result.status})`,
+    );
+    logActivity(db, dealId, 'note',
+      `⚠ Launch activation failed on Dashboard: ${result.error}. Retry later.`);
+    return;
+  }
+
+  db.prepare(
+    `UPDATE deals SET launch_client_id = ?, launch_activated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+  ).run(result.data.launch_client_id, dealId);
+
+  logActivity(db, dealId, 'system',
+    `✓ Launch program activated on Dashboard — tier: ${result.data.tier}, launch_client_id: ${result.data.launch_client_id}. Deliverable generation queued.`);
+}
+
+function logActivity(db, dealId, type, content) {
+  try {
+    db.prepare(
+      `INSERT INTO activities (deal_id, type, content, metadata, created_at)
+       VALUES (?, ?, ?, '{}', datetime('now'))`,
+    ).run(dealId, type, content);
+  } catch (e) {
+    console.error('logActivity failed:', e.message);
   }
 }
 

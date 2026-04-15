@@ -28,6 +28,11 @@ function initDb() {
   try { database.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE deals ADD COLUMN fit_score INTEGER'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE deals ADD COLUMN fit_score_breakdown TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN dashboard_user_id TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN dashboard_org_id TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN launch_client_id TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE deals ADD COLUMN launch_activated_at TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE call_recordings ADD COLUMN dashboard_org_id TEXT'); } catch(e) { /* already exists */ }
 
   // Add prospect stage action if missing (running DB migration)
   try {
@@ -40,6 +45,18 @@ function initDb() {
           { description: 'Qualify — worth reaching out?', due_offset_days: 1 },
         ] }),
         0
+      );
+    }
+  } catch(e) {}
+
+  // Add closed_won Dashboard-activation action if missing (Stage 5 migration)
+  try {
+    const activateAction = database.prepare(
+      "SELECT id FROM stage_actions WHERE stage = 'closed_won' AND action_type = 'activate_launch_on_dashboard'"
+    ).get();
+    if (!activateAction) {
+      database.prepare("INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES (?, ?, ?, ?)").run(
+        'closed_won', 'activate_launch_on_dashboard', '{}', 1
       );
     }
   } catch(e) {}

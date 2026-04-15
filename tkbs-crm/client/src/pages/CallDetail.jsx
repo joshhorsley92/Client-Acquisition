@@ -64,6 +64,10 @@ export default function CallDetail() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
 
+  // Push to Dashboard state
+  const [pushing, setPushing] = useState(false);
+  const [pushError, setPushError] = useState('');
+
   // Load call
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +206,25 @@ export default function CallDetail() {
       setProfileError(err.message || 'Save failed');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const pushToDashboard = async () => {
+    setPushError(''); setPushing(true);
+    try {
+      const result = await api.pushCallToDashboard(id);
+      const fresh = await api.getCall(id);
+      setCall(fresh.call);
+      setSavedMessage(
+        result.portal_url
+          ? `Pushed — ${result.completion_percent ?? '?'}% on Dashboard`
+          : 'Pushed to Dashboard'
+      );
+      setTimeout(() => setSavedMessage(''), 3000);
+    } catch (err) {
+      setPushError(err.message || 'Push failed');
+    } finally {
+      setPushing(false);
     }
   };
 
@@ -500,10 +523,53 @@ export default function CallDetail() {
                 >
                   {isApproved ? 'Approved ✓' : 'Approve & mark ready'}
                 </button>
+
+                {/* Push to Dashboard — Stage 4b */}
+                {call?.pushed_to_dashboard_at ? (
+                  <a
+                    href={call.portal_url || '#'}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{
+                      padding: '8px 16px', background: '#1B2838', color: '#00D4AA',
+                      border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                      textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      pointerEvents: call.portal_url ? 'auto' : 'none',
+                      opacity: call.portal_url ? 1 : 0.6,
+                    }}
+                    title={`Pushed ${new Date(call.pushed_to_dashboard_at).toLocaleString()}`}
+                  >
+                    ✓ On Dashboard ↗
+                  </a>
+                ) : (
+                  <button
+                    onClick={pushToDashboard}
+                    disabled={!isApproved || pushing}
+                    style={{
+                      padding: '8px 16px',
+                      background: (!isApproved || pushing) ? '#F7F8FA' : '#1B2838',
+                      color: (!isApproved || pushing) ? '#94a3b8' : '#00D4AA',
+                      border: (!isApproved || pushing) ? '1px solid #E2E6EB' : 'none',
+                      borderRadius: 4, fontSize: 13, fontWeight: 600,
+                      cursor: (!isApproved || pushing) ? 'not-allowed' : 'pointer',
+                    }}
+                    title={!isApproved ? 'Approve the profile first' : 'Push to the TKBS Dashboard'}
+                  >
+                    {pushing ? 'Pushing…' : 'Push to Dashboard'}
+                  </button>
+                )}
               </>
             )}
           </div>
         </div>
+
+        {pushError && (
+          <div style={{
+            background: '#FEE2E2', color: '#dc2626', border: '1px solid #dc2626',
+            padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 12,
+          }}>
+            {pushError}
+          </div>
+        )}
 
         <BrandProfileEditor
           profile={editedProfile}
