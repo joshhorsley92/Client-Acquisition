@@ -324,7 +324,44 @@ The Dashboard stays on public internet (Supabase cloud) because it's meant to be
 
 ---
 
-## 10. Current status (updated 2026-04-14 — end of day 4)
+## 10. Current status (updated 2026-04-16 — end of day 5)
+
+### Day 5 progress — Initiative 3 (C2) shared access
+
+Took on Tailscale deployment. Picked Style 2 (production-style — prod build + Express serves static + `tailscale serve` HTTPS). Joe's laptop (`mcm-pc2.tail87b28f.ts.net`) is the host.
+
+**Completed:**
+- ✅ Phase 1: Tailscale installed on Joe's laptop, HTTPS enabled on the tailnet
+- ✅ Phase 2: Vite production build working, Express serves `client/dist` + API on :3001
+- ✅ Phase 3: `tailscale serve --bg --https=443 http://localhost:3001` configured. Shared CRM live at `https://mcm-pc2.tail87b28f.ts.net` with real Let's Encrypt HTTPS. Joe logged in and confirmed his data (Wren & Ivy deal at fit score 80, Maple Lane at 27) is visible.
+- ✅ Two prod-readiness fixes committed (`a2f6f5f`):
+  1. Express 5's path-to-regexp rejects bare `*` wildcard → use `/.*/` regex for SPA fallback
+  2. Express didn't trust the tailscale serve proxy → added `app.set('trust proxy', 'loopback')` so `express-session` honors HTTPS and sets secure cookies
+
+**Pending:**
+- Josh finishing Tailscale install + joining tailnet (Joe coordinating with him)
+- Phase 4: auto-start on boot + power settings (so laptop sleeping doesn't lock Josh out)
+- Phase 5: merge Josh's local CRM data into shared DB (optional, deferred)
+
+### Known item to re-test tomorrow
+
+Wren & Ivy deal has `launch_client_id: null` + `launch_activated_at: null` in the shared DB. Seed script re-ran after yesterday's Stage 5 smoke test, wiping those columns. Not a bug — just an artifact of re-seeding. Fix: drag deal out of Closed Won and back in; Stage 5 handler is idempotent on the Dashboard side (won't create a duplicate launch_client).
+
+### Pickup for tomorrow
+
+1. **Confirm Josh is on the tailnet** and can log in at the shared URL (should already be done if he connected overnight)
+2. **Phase 4: auto-start** — write a Windows startup batch/scheduled task so `NODE_ENV=production node server/index.js` auto-runs on login, logs to a file, auto-restarts on crash. Plus power settings guidance so the laptop stops sleeping.
+3. **Re-fire Stage 5** on the Wren & Ivy deal (drag out of Closed Won and back in)
+4. **Optional: Phase 5** data merge from Josh's DB once everything else is stable
+5. **Back to the A/B/C/D menu** — Initiative 2 finish, nightly sync, Whisper, etc.
+
+**Servers live at session end:**
+- Prod CRM server running on localhost:3001 (in-session background process, dies when Joe closes terminal or laptop sleeps)
+- `tailscale serve` config persists across reboots — comes back when the node process does
+
+---
+
+## 10-OLD-day4. Historical status (2026-04-14 — end of day 4)
 
 ### 🎉 Initiative 1 functionally complete
 
