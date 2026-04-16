@@ -8,6 +8,13 @@ const { initDb } = require('./db');
 function createApp(testDb) {
   const app = express();
 
+  // When deployed behind a reverse proxy (tailscale serve, nginx, etc.),
+  // trust the proxy's X-Forwarded-Proto header so req.secure reflects the
+  // original HTTPS request. Without this, express-session refuses to set
+  // Secure cookies and sessions silently fail in production.
+  // 'loopback' trusts 127.0.0.1 / ::1 only — safe default for local proxies.
+  app.set('trust proxy', 'loopback');
+
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
 
@@ -68,7 +75,10 @@ function createApp(testDb) {
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
-    app.get('*', (req, res) => {
+    // SPA fallback — use RegExp to sidestep Express 5's path-to-regexp v8
+    // rejection of the bare `*` wildcard. Any GET that didn't match an /api/*
+    // route above falls through to index.html so React Router handles it.
+    app.get(/.*/, (req, res) => {
       res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'));
     });
   }
