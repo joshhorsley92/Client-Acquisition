@@ -1,10 +1,94 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import ScriptViewer from '../components/ScriptViewer';
 import FollowUpScheduler from '../components/FollowUpScheduler';
 import EmailComposer from '../components/EmailComposer';
 import SmsComposer from '../components/SmsComposer';
+
+function DealCallsTab({ dealId }) {
+  const [calls, setCalls] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getCalls({ deal_id: dealId })
+      .then((d) => setCalls(d.calls || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [dealId]);
+
+  if (loading) return <div style={{ padding: 20, fontSize: 13, color: '#64748B' }}>Loading calls...</div>;
+
+  if (calls.length === 0) {
+    return (
+      <div style={{
+        background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8,
+        padding: 24, textAlign: 'center', fontSize: 13, color: '#64748B',
+      }}>
+        No calls recorded for this deal.{' '}
+        <Link to="/calls" style={{ color: '#00D4AA', textDecoration: 'none', fontWeight: 600 }}>
+          Record one →
+        </Link>
+      </div>
+    );
+  }
+
+  const statusBadge = (call) => {
+    let label, bg, color, border;
+    if (call.pushed_to_dashboard_at) {
+      label = 'On Dashboard'; bg = '#E6FAF5'; color = '#00D4AA'; border = '#00D4AA';
+    } else if (call.review_status === 'approved') {
+      label = 'Approved'; bg = '#E6FAF5'; color = '#00D4AA'; border = '#00D4AA';
+    } else if (call.review_status === 'pending') {
+      label = 'Ready to review'; bg = '#FFF3E0'; color = '#E6A817'; border = '#E6A817';
+    } else if (call.transcript) {
+      label = 'Transcript'; bg = '#F7F8FA'; color = '#1B2838'; border = '#E2E6EB';
+    } else {
+      label = 'Audio only'; bg = '#F7F8FA'; color = '#64748B'; border = '#E2E6EB';
+    }
+    return (
+      <span style={{
+        fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
+        background: bg, color, border: `1px solid ${border}`,
+      }}>{label}</span>
+    );
+  };
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, overflow: 'hidden' }}>
+      {calls.map((call, i) => (
+        <div
+          key={call.id}
+          style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '12px 16px', background: i % 2 === 0 ? '#fff' : '#F7F8FA',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, color: '#1B2838', fontWeight: 600 }}>
+              {call.call_date ? new Date(call.call_date).toLocaleDateString() : 'No date'}
+              {call.duration_minutes ? ` · ${call.duration_minutes} min` : ''}
+            </div>
+            {call.notes && (
+              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2, maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {call.notes}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {statusBadge(call)}
+            <Link
+              to={`/calls/${call.id}`}
+              style={{ fontSize: 13, color: '#00D4AA', textDecoration: 'none', fontWeight: 600 }}
+            >
+              Open
+            </Link>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function DealDetail() {
   const { id } = useParams();
@@ -116,7 +200,7 @@ export default function DealDetail() {
   if (loading) return <div style={{ padding: 40 }}>Loading deal...</div>;
   if (!deal) return <div style={{ padding: 40 }}>Deal not found.</div>;
 
-  const tabs = ['overview', 'activity', 'tasks', 'scripts', 'email'];
+  const tabs = ['overview', 'activity', 'tasks', 'scripts', 'email', 'calls'];
   const tabStyle = (t) => ({
     padding: '8px 16px', fontSize: 13, fontWeight: activeTab === t ? 600 : 400,
     color: activeTab === t ? '#00D4AA' : '#64748B', background: 'none', border: 'none',
@@ -126,7 +210,7 @@ export default function DealDetail() {
 
   return (
     <div>
-      <button onClick={() => navigate('/')} style={{
+      <button onClick={() => navigate('/pipeline')} style={{
         background: 'none', border: 'none', color: '#64748B', fontSize: 13,
         cursor: 'pointer', marginBottom: 16,
       }}>
@@ -574,6 +658,10 @@ export default function DealDetail() {
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'calls' && (
+        <DealCallsTab dealId={deal.id} />
       )}
     </div>
   );

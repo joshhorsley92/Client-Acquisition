@@ -25,6 +25,17 @@ router.get('/', (req, res) => {
     conditions.push('d.source = ?');
     params.push(req.query.source);
   }
+  if (req.query.stale_days) {
+    const days = parseInt(req.query.stale_days) || 14;
+    conditions.push(`d.stage NOT IN ('closed_won', 'closed_lost') AND d.id NOT IN (
+      SELECT deal_id FROM activities WHERE created_at > datetime('now', '-${days} days')
+    )`);
+  }
+  if (req.query.has_tasks_due_today === 'true') {
+    conditions.push(`d.id IN (
+      SELECT deal_id FROM tasks WHERE date(due_at) = date('now') AND (status IS NULL OR status != 'done')
+    )`);
+  }
 
   if (conditions.length > 0) {
     query += ' WHERE ' + conditions.join(' AND ');

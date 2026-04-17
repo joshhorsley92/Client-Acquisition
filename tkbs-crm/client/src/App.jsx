@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { api } from './lib/api';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Home from './pages/Home';
 import Pipeline from './pages/Pipeline';
 import DealDetail from './pages/DealDetail';
 import Contacts from './pages/Contacts';
@@ -41,7 +42,7 @@ export default function App() {
 
   const login = async (email, password) => {
     const data = await api.login({ email, password });
-    if (data.mfa_required) return data; // Caller handles TOTP step
+    if (data.mfa_required) return data;
     setUser(data.user);
     return data;
   };
@@ -72,7 +73,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<Pipeline />} />
+            <Route index element={<Home />} />
+            <Route path="pipeline" element={<Pipeline />} />
             <Route path="deals/:id" element={<DealDetail />} />
             <Route path="contacts" element={<Contacts />} />
             <Route path="companies" element={<Companies />} />

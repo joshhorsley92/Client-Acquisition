@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../App';
+import GlobalSearch from './GlobalSearch';
 
 const navItems = [
-  { to: '/', label: 'Pipeline', icon: '◫' },
+  { to: '/', label: 'Home', icon: '◉' },
+  { to: '/pipeline', label: 'Pipeline', icon: '◫' },
   { to: '/import', label: 'Import', icon: '⬆' },
   { to: '/tasks', label: 'Tasks', icon: '☑' },
   { to: '/contacts', label: 'Contacts', icon: '☻' },
@@ -16,6 +18,18 @@ const navItems = [
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -29,7 +43,7 @@ export default function Layout() {
         padding: '20px 0',
         flexShrink: 0,
       }}>
-        <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #2A3A4E' }}>
+        <div style={{ padding: '0 20px 16px', borderBottom: '1px solid #2A3A4E' }}>
           <span style={{ fontWeight: 'bold', fontSize: 18 }}>
             <span style={{ color: '#fff' }}>TURN</span>
             <span style={{ color: '#00D4AA' }}>KEY</span>
@@ -37,7 +51,23 @@ export default function Layout() {
           <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>CRM</div>
         </div>
 
-        <div style={{ flex: 1, padding: '12px 0' }}>
+        {/* Search trigger */}
+        <button
+          onClick={() => setSearchOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            margin: '12px 12px 4px', padding: '8px 12px',
+            background: '#2A3A4E', border: 'none', borderRadius: 4,
+            color: '#94a3b8', fontSize: 13, cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <span style={{ fontSize: 14 }}>🔍</span>
+          <span style={{ flex: 1 }}>Search...</span>
+          <span style={{ fontSize: 11, color: '#64748B', background: '#1B2838', padding: '1px 6px', borderRadius: 3 }}>⌘K</span>
+        </button>
+
+        <div style={{ flex: 1, padding: '8px 0' }}>
           {navItems.map(({ to, label, icon }) => (
             <NavLink
               key={to}
@@ -53,6 +83,7 @@ export default function Layout() {
                 borderLeft: isActive ? '3px solid #00D4AA' : '3px solid transparent',
                 fontSize: 14,
                 fontWeight: isActive ? 600 : 400,
+                textDecoration: 'none',
               })}
             >
               <span style={{ fontSize: 16 }}>{icon}</span>
@@ -79,6 +110,9 @@ export default function Layout() {
       <main style={{ flex: 1, padding: 24, overflow: 'auto' }}>
         <Outlet />
       </main>
+
+      {/* Global search modal */}
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

@@ -30,10 +30,16 @@ export default function Pipeline() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('recent');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [todayOnly, setTodayOnly] = useState(false);
+  const [users, setUsers] = useState([]);
 
   const loadDeals = async () => {
     try {
-      const data = await api.getDeals();
+      const params = {};
+      if (ownerFilter) params.owner_id = ownerFilter;
+      if (todayOnly) params.has_tasks_due_today = 'true';
+      const data = await api.getDeals(params);
       setDeals(data.deals);
     } catch (err) {
       console.error('Failed to load deals:', err);
@@ -42,7 +48,10 @@ export default function Pipeline() {
     }
   };
 
-  useEffect(() => { loadDeals(); }, []);
+  useEffect(() => { loadDeals(); }, [ownerFilter, todayOnly]);
+  useEffect(() => {
+    api.request('/settings/users').then((d) => setUsers(d.users || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (showNewDeal) {
@@ -126,6 +135,34 @@ export default function Pipeline() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>Pipeline</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ fontSize: 12, color: '#64748B' }}>Owner:</label>
+          <select
+            value={ownerFilter}
+            onChange={(e) => setOwnerFilter(e.target.value)}
+            style={{
+              padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
+              fontSize: 14, background: '#fff', color: '#1B2838', cursor: 'pointer',
+            }}
+          >
+            <option value="">All</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setTodayOnly((v) => !v)}
+            style={{
+              padding: '8px 12px', borderRadius: 4, fontSize: 13, fontWeight: 600,
+              background: todayOnly ? '#00D4AA' : '#fff',
+              color: todayOnly ? '#1B2838' : '#64748B',
+              border: todayOnly ? 'none' : '1px solid #E2E6EB',
+              cursor: 'pointer',
+            }}
+          >
+            {todayOnly ? 'Tasks today ✓' : 'Tasks today'}
+          </button>
+
           <label style={{ fontSize: 12, color: '#64748B' }}>Sort:</label>
           <select
             value={sortBy}
@@ -136,8 +173,8 @@ export default function Pipeline() {
             }}
           >
             <option value="recent">Recent</option>
-            <option value="value_desc">Value (high &rarr; low)</option>
-            <option value="fit_desc">Fit score (high &rarr; low)</option>
+            <option value="value_desc">Value (high → low)</option>
+            <option value="fit_desc">Fit score (high → low)</option>
           </select>
           <button
             onClick={() => setShowNewDeal(true)}

@@ -5,15 +5,24 @@ router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const { deal_id } = req.query;
-  let query = 'SELECT * FROM activities';
+  let query = 'SELECT a.*, c.name AS company_name FROM activities a LEFT JOIN deals d ON a.deal_id = d.id LEFT JOIN companies c ON d.company_id = c.id';
+  const conditions = [];
   const params = [];
 
   if (deal_id) {
-    query += ' WHERE deal_id = ?';
+    conditions.push('a.deal_id = ?');
     params.push(deal_id);
   }
+  if (req.query.exclude_auto === 'true') {
+    conditions.push("a.type IN ('note', 'call', 'email', 'meeting', 'stage_change')");
+  }
 
-  query += ' ORDER BY created_at DESC';
+  if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+  query += ' ORDER BY a.created_at DESC';
+
+  const limit = req.query.limit ? Math.min(200, parseInt(req.query.limit)) : null;
+  if (limit) query += ` LIMIT ${limit}`;
+
   const activities = req.db.prepare(query).all(...params);
   res.json({ activities });
 });

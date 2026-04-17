@@ -71,6 +71,9 @@ export const api = {
   getReportLostReasons: () => request('/reports/lost-reasons'),
   getReportMonthly: () => request('/reports/monthly'),
 
+  // Search (cross-entity)
+  search: (q, limit) => request(`/search?q=${encodeURIComponent(q || '')}${limit ? '&limit=' + limit : ''}`),
+
   // Audit log (admin only)
   getAuditLog: (params) => request(`/settings/audit-log${params ? '?' + new URLSearchParams(params) : ''}`),
 

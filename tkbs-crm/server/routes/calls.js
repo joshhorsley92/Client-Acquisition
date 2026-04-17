@@ -33,26 +33,29 @@ const upload = multer({
   },
 });
 
-// List — optionally filter by deal_id
+// List — filter by deal_id, review_status
 router.get('/', (req, res) => {
-  const dealId = req.query.deal_id ? parseInt(req.query.deal_id) : null;
-  const rows = dealId
-    ? req.db.prepare(`
-        SELECT c.*, d.id AS deal_id, co.name AS company_name
-        FROM call_recordings c
-        LEFT JOIN deals d ON c.deal_id = d.id
-        LEFT JOIN companies co ON d.company_id = co.id
-        WHERE c.deal_id = ?
-        ORDER BY c.created_at DESC, c.id DESC
-      `).all(dealId)
-    : req.db.prepare(`
-        SELECT c.*, d.id AS deal_id, co.name AS company_name
-        FROM call_recordings c
-        LEFT JOIN deals d ON c.deal_id = d.id
-        LEFT JOIN companies co ON d.company_id = co.id
-        ORDER BY c.created_at DESC, c.id DESC
-        LIMIT 200
-      `).all();
+  let query = `
+    SELECT c.*, d.id AS deal_id, co.name AS company_name
+    FROM call_recordings c
+    LEFT JOIN deals d ON c.deal_id = d.id
+    LEFT JOIN companies co ON d.company_id = co.id`;
+  const conditions = [];
+  const params = [];
+
+  if (req.query.deal_id) {
+    conditions.push('c.deal_id = ?');
+    params.push(parseInt(req.query.deal_id));
+  }
+  if (req.query.review_status) {
+    conditions.push('c.review_status = ?');
+    params.push(req.query.review_status);
+  }
+
+  if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+  query += ' ORDER BY c.created_at DESC, c.id DESC LIMIT 200';
+
+  const rows = req.db.prepare(query).all(...params);
   res.json({ calls: rows });
 });
 

@@ -19,6 +19,15 @@ router.get('/', (req, res) => {
     conditions.push('t.status = ?');
     params.push(req.query.status);
   }
+  if (req.query.due === 'today') {
+    conditions.push("date(t.due_at) = date('now')");
+  }
+  if (req.query.due === 'overdue') {
+    conditions.push("t.due_at < datetime('now') AND (t.status IS NULL OR t.status != 'done')");
+  }
+  if (req.query.exclude_auto === 'true') {
+    conditions.push('(t.auto_generated IS NULL OR t.auto_generated = 0)');
+  }
 
   if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
   query += ' ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC';
