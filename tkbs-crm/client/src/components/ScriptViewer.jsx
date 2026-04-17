@@ -30,9 +30,15 @@ export default function ScriptViewer({ deal, contact, company }) {
       type: company?.type || '', website: company?.website || '',
       source: deal?.source || '', source_detail: deal?.source_detail || '',
       referrer: deal?.source_detail || '', package_type: deal?.package_type || '',
-      estimated_value: deal?.estimated_value || '', call_notes: deal?.call_notes || '',
+      estimated_value: deal?.estimated_value ? `$${Number(deal.estimated_value).toLocaleString()}` : '',
+      call_notes: deal?.call_notes || '',
       research_findings: deal?.research_findings || '', objections_noted: deal?.objections_noted || '',
-      services: deal?.services_discussed || '',
+      services: deal?.services_discussed || '', services_discussed: deal?.services_discussed || '',
+      pricing_notes: deal?.pricing_notes || '',
+      stage: deal?.stage?.replace(/_/g, ' ') || '',
+      company_name: company?.name || '',
+      contact_name: contact?.name || '',
+      contact_email: contact?.email || '',
     };
     return content.replace(/\{(\w+)\}/g, (match, field) => context[field] || match);
   };

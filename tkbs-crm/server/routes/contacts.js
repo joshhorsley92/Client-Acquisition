@@ -4,15 +4,34 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 
 router.get('/', (req, res) => {
-  let query = 'SELECT contacts.*, companies.name as company_name FROM contacts LEFT JOIN companies ON contacts.company_id = companies.id';
+  let query = 'SELECT ct.*, c.name as company_name FROM contacts ct LEFT JOIN companies c ON ct.company_id = c.id';
   const params = [];
+  const conditions = [];
 
   if (req.query.company_id) {
-    query += ' WHERE contacts.company_id = ?';
+    conditions.push('ct.company_id = ?');
     params.push(req.query.company_id);
   }
 
-  query += ' ORDER BY contacts.created_at DESC';
+  if (req.query.q) {
+    const term = `%${req.query.q}%`;
+    conditions.push('(ct.name LIKE ? OR ct.email LIKE ? OR ct.phone LIKE ? OR c.name LIKE ?)');
+    params.push(term, term, term, term);
+  }
+
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  const sort = req.query.sort || 'company';
+  if (sort === 'name') {
+    query += ' ORDER BY ct.name ASC';
+  } else if (sort === 'recent') {
+    query += ' ORDER BY ct.created_at DESC';
+  } else {
+    query += ' ORDER BY c.name ASC NULLS LAST, ct.name ASC';
+  }
+
   const contacts = req.db.prepare(query).all(...params);
   res.json({ contacts });
 });

@@ -28,7 +28,7 @@ export const api = {
   disableTotp: (body) => request('/auth/disable-totp', { method: 'POST', body }),
 
   // Companies
-  getCompanies: () => request('/companies'),
+  getCompanies: (params) => request(`/companies${params ? '?' + new URLSearchParams(params) : ''}`),
   getCompany: (id) => request(`/companies/${id}`),
   createCompany: (body) => request('/companies', { method: 'POST', body }),
   updateCompany: (id, body) => request(`/companies/${id}`, { method: 'PATCH', body }),

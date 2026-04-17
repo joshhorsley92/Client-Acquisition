@@ -100,6 +100,7 @@ export default function DealDetail() {
   const [tasks, setTasks] = useState([]);
   const [emailThread, setEmailThread] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
+  const [activityFilter, setActivityFilter] = useState('all');
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [expandedTask, setExpandedTask] = useState(null);
@@ -440,7 +441,7 @@ export default function DealDetail() {
       {/* Activity Tab */}
       {activeTab === 'activity' && (
         <div>
-          <form onSubmit={addNote} style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <form onSubmit={addNote} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <input
               value={newNote} onChange={(e) => setNewNote(e.target.value)}
               placeholder="Add a note..."
@@ -457,27 +458,58 @@ export default function DealDetail() {
             </button>
           </form>
 
+          {/* Activity type filter */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'note', label: 'Notes' },
+              { key: 'call', label: 'Calls' },
+              { key: 'email', label: 'Emails' },
+              { key: 'meeting', label: 'Meetings' },
+              { key: 'stage_change', label: 'Stage changes' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setActivityFilter(key)}
+                style={{
+                  padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                  borderRadius: 4, cursor: 'pointer',
+                  background: activityFilter === key ? '#1B2838' : '#fff',
+                  color: activityFilter === key ? '#00D4AA' : '#64748B',
+                  border: activityFilter === key ? 'none' : '1px solid #E2E6EB',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div>
-            {activities.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No activity yet.</div>}
-            {activities.map((a) => (
-              <div key={a.id} style={{
-                padding: '10px 0', borderBottom: '1px solid #F7F8FA',
-                display: 'flex', gap: 12, alignItems: 'flex-start',
-              }}>
-                <span style={{
-                  fontSize: 11, color: '#fff', background: '#1B2838',
-                  borderRadius: 4, padding: '2px 6px', minWidth: 50, textAlign: 'center',
+            {(() => {
+              const filtered = activityFilter === 'all'
+                ? activities
+                : activities.filter((a) => a.type === activityFilter);
+              if (filtered.length === 0) return <div style={{ fontSize: 13, color: '#64748B' }}>No {activityFilter === 'all' ? '' : activityFilter + ' '}activity yet.</div>;
+              return filtered.map((a) => (
+                <div key={a.id} style={{
+                  padding: '10px 0', borderBottom: '1px solid #F7F8FA',
+                  display: 'flex', gap: 12, alignItems: 'flex-start',
                 }}>
-                  {a.type}
-                </span>
-                <div>
-                  <div style={{ fontSize: 13 }}>{a.content || '—'}</div>
-                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
-                    {new Date(a.created_at).toLocaleString()}
+                  <span style={{
+                    fontSize: 11, color: '#fff', background: '#1B2838',
+                    borderRadius: 4, padding: '2px 6px', minWidth: 50, textAlign: 'center',
+                  }}>
+                    {a.type}
+                  </span>
+                  <div>
+                    <div style={{ fontSize: 13 }}>{a.content || '—'}</div>
+                    <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                      {new Date(a.created_at).toLocaleString()}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
       )}

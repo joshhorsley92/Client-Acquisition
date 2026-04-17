@@ -283,6 +283,48 @@ export default function Settings() {
   const [secretCopied, setSecretCopied] = useState(false);
   const mfaEnabled = !!user?.totp_enabled;
 
+  // ICP editor state
+  const [icpData, setIcpData] = useState(null);
+  const [icpLoading, setIcpLoading] = useState(false);
+  const [icpSaving, setIcpSaving] = useState(false);
+  const [icpError, setIcpError] = useState('');
+  const [icpSuccess, setIcpSuccess] = useState('');
+
+  useEffect(() => {
+    if (activeTab !== 'icp' || !isAdmin) return;
+    setIcpLoading(true);
+    api.request('/settings/icp')
+      .then((d) => setIcpData(d))
+      .catch((err) => setIcpError(err.message || 'Failed to load ICP'))
+      .finally(() => setIcpLoading(false));
+  }, [activeTab, isAdmin]);
+
+  const saveIcp = async () => {
+    setIcpError(''); setIcpSuccess(''); setIcpSaving(true);
+    try {
+      const updated = await api.request('/settings/icp', { method: 'PUT', body: icpData });
+      setIcpData(updated);
+      setIcpSuccess('ICP config saved.');
+      setTimeout(() => setIcpSuccess(''), 3000);
+    } catch (err) {
+      setIcpError(err.message || 'Save failed');
+    } finally {
+      setIcpSaving(false);
+    }
+  };
+
+  const updateIcp = (path, value) => {
+    const next = JSON.parse(JSON.stringify(icpData));
+    const parts = path.split('.');
+    let node = next;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node[parts[i]]) node[parts[i]] = {};
+      node = node[parts[i]];
+    }
+    node[parts[parts.length - 1]] = value;
+    setIcpData(next);
+  };
+
   useEffect(() => {
     api.request('/settings/actions').then(d => setActions(d.actions)).catch(() => {});
     api.request('/settings/users').then(d => setUsers(d.users)).catch(() => {});
@@ -450,6 +492,9 @@ export default function Settings() {
         <button onClick={() => setActiveTab('users')} style={tabStyle('users')}>Team</button>
         <button onClick={() => setActiveTab('integrations')} style={tabStyle('integrations')}>Integrations</button>
         <button onClick={() => setActiveTab('security')} style={tabStyle('security')}>Security</button>
+        {isAdmin && (
+          <button onClick={() => setActiveTab('icp')} style={tabStyle('icp')}>ICP</button>
+        )}
         {isAdmin && (
           <button onClick={() => setActiveTab('audit')} style={tabStyle('audit')}>Audit Log</button>
         )}
@@ -782,6 +827,204 @@ export default function Settings() {
               </form>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'icp' && isAdmin && (
+        <div>
+          <div style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>
+            Ideal Customer Profile — defines who TKBS targets and how the Fit Score engine weights prospects. Changes take effect immediately.
+          </div>
+
+          {icpSuccess && (
+            <div style={{ background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA', padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 16 }}>{icpSuccess}</div>
+          )}
+          {icpError && (
+            <div style={{ background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817', padding: '8px 12px', borderRadius: 4, fontSize: 13, marginBottom: 16 }}>{icpError}</div>
+          )}
+
+          {icpLoading ? (
+            <div style={{ padding: 24, fontSize: 13, color: '#64748B' }}>Loading ICP config...</div>
+          ) : icpData ? (
+            <div>
+              {/* Target Industries */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Target Industries</h3>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Included (these industries score full points)</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                    {(icpData.target_industries?.included || []).map((item, i) => (
+                      <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 8px', borderRadius: 12, background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA' }}>
+                        {item}
+                        <button type="button" onClick={() => updateIcp('target_industries.included', icpData.target_industries.included.filter((_, idx) => idx !== i))} style={{ background: 'none', border: 'none', color: '#00D4AA', cursor: 'pointer', padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input id="icp-inc" type="text" placeholder="Add industry..." onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) { updateIcp('target_industries.included', [...(icpData.target_industries?.included || []), v]); e.target.value = ''; } } }}
+                      style={{ flex: 1, padding: '6px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13 }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Excluded (these industries score zero + red flag)</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                    {(icpData.target_industries?.excluded || []).map((item, i) => (
+                      <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 8px', borderRadius: 12, background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817' }}>
+                        {item}
+                        <button type="button" onClick={() => updateIcp('target_industries.excluded', icpData.target_industries.excluded.filter((_, idx) => idx !== i))} style={{ background: 'none', border: 'none', color: '#E6A817', cursor: 'pointer', padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input type="text" placeholder="Add excluded industry..." onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) { updateIcp('target_industries.excluded', [...(icpData.target_industries?.excluded || []), v]); e.target.value = ''; } } }}
+                      style={{ flex: 1, padding: '6px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Revenue Range */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Revenue Range</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Minimum ($)</label>
+                    <input type="number" min="0" value={icpData.revenue_range?.min_usd || ''} onChange={(e) => updateIcp('revenue_range.min_usd', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Maximum ($)</label>
+                    <input type="number" min="0" value={icpData.revenue_range?.max_usd || ''} onChange={(e) => updateIcp('revenue_range.max_usd', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Geographic Preference */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Geographic Preference</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Primary Region</label>
+                    <input type="text" value={icpData.geographic_preference?.primary_region || ''} onChange={(e) => updateIcp('geographic_preference.primary_region', e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>National OK</label>
+                    <button type="button" onClick={() => updateIcp('geographic_preference.national_ok', !icpData.geographic_preference?.national_ok)}
+                      style={{ padding: '8px 16px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer', width: '100%', background: icpData.geographic_preference?.national_ok ? '#00D4AA' : '#fff', color: icpData.geographic_preference?.national_ok ? '#1B2838' : '#64748B', border: icpData.geographic_preference?.national_ok ? 'none' : '1px solid #E2E6EB' }}>
+                      {icpData.geographic_preference?.national_ok ? 'Yes' : 'No'}
+                    </button>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>International OK</label>
+                    <button type="button" onClick={() => updateIcp('geographic_preference.international_ok', !icpData.geographic_preference?.international_ok)}
+                      style={{ padding: '8px 16px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer', width: '100%', background: icpData.geographic_preference?.international_ok ? '#00D4AA' : '#fff', color: icpData.geographic_preference?.international_ok ? '#1B2838' : '#64748B', border: icpData.geographic_preference?.international_ok ? 'none' : '1px solid #E2E6EB' }}>
+                      {icpData.geographic_preference?.international_ok ? 'Yes' : 'No'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Green Flags */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Green Flags (positive signals)</h3>
+                {(icpData.green_flags || []).map((flag, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    <input type="text" value={flag.label || ''} onChange={(e) => { const next = [...icpData.green_flags]; next[i] = { ...next[i], label: e.target.value }; updateIcp('green_flags', next); }}
+                      style={{ flex: 1, padding: '6px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <label style={{ fontSize: 11, color: '#64748B' }}>Weight:</label>
+                      <input type="number" min="0" max="20" value={flag.weight || 0} onChange={(e) => { const next = [...icpData.green_flags]; next[i] = { ...next[i], weight: parseInt(e.target.value) || 0 }; updateIcp('green_flags', next); }}
+                        style={{ width: 60, padding: '6px 8px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, textAlign: 'center' }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>{flag.id}</span>
+                    <button type="button" onClick={() => updateIcp('green_flags', icpData.green_flags.filter((_, idx) => idx !== i))}
+                      style={{ background: 'none', border: 'none', color: '#E6A817', cursor: 'pointer', fontSize: 16, padding: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Red Flags */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Red Flags (negative signals)</h3>
+                {(icpData.red_flags || []).map((flag, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                    <input type="text" value={flag.label || ''} onChange={(e) => { const next = [...icpData.red_flags]; next[i] = { ...next[i], label: e.target.value }; updateIcp('red_flags', next); }}
+                      style={{ flex: 1, padding: '6px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <label style={{ fontSize: 11, color: '#64748B' }}>Penalty:</label>
+                      <input type="number" max="0" value={flag.weight || 0} onChange={(e) => { const next = [...icpData.red_flags]; next[i] = { ...next[i], weight: parseInt(e.target.value) || 0 }; updateIcp('red_flags', next); }}
+                        style={{ width: 60, padding: '6px 8px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, textAlign: 'center' }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>{flag.id}</span>
+                    <button type="button" onClick={() => updateIcp('red_flags', icpData.red_flags.filter((_, idx) => idx !== i))}
+                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16, padding: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Scoring Weights */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Scoring Weights</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>ICP Match</label>
+                    <input type="number" min="0" max="100" value={icpData.scoring_weights?.icp_match ?? ''} onChange={(e) => updateIcp('scoring_weights.icp_match', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Readiness Signals</label>
+                    <input type="number" min="0" max="100" value={icpData.scoring_weights?.readiness_signals ?? ''} onChange={(e) => updateIcp('scoring_weights.readiness_signals', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Engagement</label>
+                    <input type="number" min="0" max="100" value={icpData.scoring_weights?.engagement ?? ''} onChange={(e) => updateIcp('scoring_weights.engagement', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+                {(() => {
+                  const sum = (icpData.scoring_weights?.icp_match || 0) + (icpData.scoring_weights?.readiness_signals || 0) + (icpData.scoring_weights?.engagement || 0);
+                  return sum !== 100 ? (
+                    <div style={{ background: '#FEE2E2', color: '#dc2626', border: '1px solid #dc2626', padding: '6px 12px', borderRadius: 4, fontSize: 12 }}>
+                      Weights must sum to 100 (currently {sum})
+                    </div>
+                  ) : (
+                    <div style={{ background: '#E6FAF5', color: '#00D4AA', padding: '6px 12px', borderRadius: 4, fontSize: 12 }}>
+                      ✓ Weights sum to 100
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Other settings */}
+              <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>Other</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Hourly rate ($)</label>
+                    <input type="number" min="0" value={icpData.hourly_rate_usd || ''} onChange={(e) => updateIcp('hourly_rate_usd', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748B', display: 'block', marginBottom: 4 }}>Minimum launch plan ($)</label>
+                    <input type="number" min="0" value={icpData.deal_threshold?.minimum_launch_plan_usd || ''} onChange={(e) => updateIcp('deal_threshold.minimum_launch_plan_usd', parseInt(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Save */}
+              <button onClick={saveIcp} disabled={icpSaving}
+                style={{
+                  padding: '10px 24px', background: '#00D4AA', color: '#1B2838',
+                  border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
+                  cursor: icpSaving ? 'not-allowed' : 'pointer', opacity: icpSaving ? 0.6 : 1,
+                }}>
+                {icpSaving ? 'Saving...' : 'Save ICP Config'}
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 

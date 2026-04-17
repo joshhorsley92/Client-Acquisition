@@ -12,12 +12,51 @@ export default function Scripts() {
   const [form, setForm] = useState({ stage: 'outreach', name: '', type: 'email', content: '' });
   const [editing, setEditing] = useState(null);
 
+  // Deal context for merge-field preview
+  const [deals, setDeals] = useState([]);
+  const [selectedDealId, setSelectedDealId] = useState('');
+  const [dealContext, setDealContext] = useState({ deal: null, company: null, contact: null });
+
   const load = async () => {
     const data = await api.getScripts({ stage: activeStage });
     setScripts(data.scripts);
   };
 
   useEffect(() => { load(); }, [activeStage]);
+
+  useEffect(() => {
+    api.getDeals().then((d) => setDeals(d.deals || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDealId) {
+      setDealContext({ deal: null, company: null, contact: null });
+      return;
+    }
+    api.getDeal(selectedDealId).then((d) => {
+      setDealContext({ deal: d.deal, company: d.company, contact: d.contact });
+    }).catch(() => setDealContext({ deal: null, company: null, contact: null }));
+  }, [selectedDealId]);
+
+  const fillMergeFields = (content) => {
+    if (!dealContext.deal) return content;
+    const { deal, company, contact } = dealContext;
+    const ctx = {
+      company: company?.name || '', contact: contact?.name || '',
+      email: contact?.email || '', phone: contact?.phone || '',
+      industry: company?.industry || '', location: company?.location || '',
+      type: company?.type || '', website: company?.website || '',
+      source: deal?.source || '', source_detail: deal?.source_detail || '',
+      package_type: deal?.package_type || '',
+      estimated_value: deal?.estimated_value ? `$${Number(deal.estimated_value).toLocaleString()}` : '',
+      call_notes: deal?.call_notes || '', pricing_notes: deal?.pricing_notes || '',
+      services_discussed: deal?.services_discussed || '', services: deal?.services_discussed || '',
+      research_findings: deal?.research_findings || '', objections_noted: deal?.objections_noted || '',
+      stage: deal?.stage?.replace(/_/g, ' ') || '',
+      company_name: company?.name || '', contact_name: contact?.name || '', contact_email: contact?.email || '',
+    };
+    return content.replace(/\{(\w+)\}/g, (match, field) => ctx[field] || match);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -57,6 +96,37 @@ export default function Scripts() {
         >
           + New Template
         </button>
+      </div>
+
+      {/* Deal context picker for merge-field preview */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        marginBottom: 16, padding: '10px 16px',
+        background: '#F7F8FA', borderRadius: 6, border: '1px solid #E2E6EB',
+      }}>
+        <label style={{ fontSize: 12, color: '#64748B', fontWeight: 600, whiteSpace: 'nowrap' }}>
+          Preview with deal:
+        </label>
+        <select
+          value={selectedDealId}
+          onChange={(e) => setSelectedDealId(e.target.value)}
+          style={{
+            flex: 1, maxWidth: 400, padding: '6px 10px', border: '1px solid #E2E6EB',
+            borderRadius: 4, fontSize: 13, background: '#fff', color: '#1B2838',
+          }}
+        >
+          <option value="">None (show raw merge fields)</option>
+          {deals.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.company_name || `Deal #${d.id}`} — {d.stage?.replace(/_/g, ' ')}
+            </option>
+          ))}
+        </select>
+        {dealContext.deal && (
+          <span style={{ fontSize: 11, color: '#00D4AA', fontWeight: 600 }}>
+            ✓ {dealContext.company?.name || 'Loaded'}
+          </span>
+        )}
       </div>
 
       {/* Stage tabs */}
@@ -100,10 +170,15 @@ export default function Scripts() {
             </div>
           </div>
           <pre style={{
-            background: '#F7F8FA', padding: 12, borderRadius: 4, fontSize: 12,
+            background: dealContext.deal ? '#fff' : '#F7F8FA',
+            border: dealContext.deal ? '1px solid #E6FAF5' : 'none',
+            padding: 12, borderRadius: 4, fontSize: 12,
             whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', color: '#64748B',
           }}>
-            {s.content.slice(0, 300)}{s.content.length > 300 ? '...' : ''}
+            {(() => {
+              const filled = fillMergeFields(s.content);
+              return filled.slice(0, 300) + (filled.length > 300 ? '...' : '');
+            })()}
           </pre>
         </div>
       ))}

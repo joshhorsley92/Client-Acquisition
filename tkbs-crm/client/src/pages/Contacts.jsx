@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
 
@@ -8,11 +8,17 @@ export default function Contacts() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', phone: '', role: '', company_id: '' });
   const [editing, setEditing] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('company');
+  const debounceRef = useRef(null);
 
-  const load = async () => {
-    const data = await api.getContacts();
+  const load = useCallback(async (q, sort) => {
+    const params = {};
+    if (q) params.q = q;
+    if (sort) params.sort = sort;
+    const data = await api.getContacts(params);
     setContacts(data.contacts);
-  };
+  }, []);
 
   const loadCompanies = async () => {
     const data = await api.getCompanies();
@@ -20,9 +26,24 @@ export default function Contacts() {
   };
 
   useEffect(() => {
-    load();
+    load(searchTerm, sortBy);
     loadCompanies();
   }, []);
+
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      load(value, sortBy);
+    }, 300);
+  };
+
+  const handleSortChange = (e) => {
+    const value = e.target.value;
+    setSortBy(value);
+    load(searchTerm, value);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,7 +62,7 @@ export default function Contacts() {
     setShowForm(false);
     setForm({ name: '', email: '', phone: '', role: '', company_id: '' });
     setEditing(null);
-    load();
+    load(searchTerm, sortBy);
   };
 
   const startEdit = (c) => {
@@ -59,13 +80,37 @@ export default function Contacts() {
   const handleDelete = async (id) => {
     if (!confirm('Delete this contact?')) return;
     await api.deleteContact(id);
-    load();
+    load(searchTerm, sortBy);
   };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>Contacts</h1>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="Search contacts..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            style={{
+              padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
+              fontSize: 14, width: 300,
+            }}
+          />
+          <select
+            value={sortBy}
+            onChange={handleSortChange}
+            style={{
+              padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
+              fontSize: 14, background: '#fff',
+            }}
+          >
+            <option value="company">By company</option>
+            <option value="name">By name</option>
+            <option value="recent">Recent</option>
+          </select>
+        </div>
         <button
           onClick={() => { setEditing(null); setForm({ name: '', email: '', phone: '', role: '', company_id: '' }); setShowForm(true); }}
           style={{

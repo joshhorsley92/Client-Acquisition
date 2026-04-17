@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
 
@@ -7,13 +7,26 @@ export default function Companies() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', location: '', industry: '', type: '', website: '' });
   const [editing, setEditing] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const debounceRef = useRef(null);
 
-  const load = async () => {
-    const data = await api.getCompanies();
+  const load = useCallback(async (q) => {
+    const params = {};
+    if (q) params.q = q;
+    const data = await api.getCompanies(params);
     setCompanies(data.companies);
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(searchTerm); }, []);
+
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      load(value);
+    }, 300);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,7 +38,7 @@ export default function Companies() {
     setShowForm(false);
     setForm({ name: '', location: '', industry: '', type: '', website: '' });
     setEditing(null);
-    load();
+    load(searchTerm);
   };
 
   const startEdit = (c) => {
@@ -37,13 +50,25 @@ export default function Companies() {
   const handleDelete = async (id) => {
     if (!confirm('Delete this company?')) return;
     await api.deleteCompany(id);
-    load();
+    load(searchTerm);
   };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>Companies</h1>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="Search companies..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            style={{
+              padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
+              fontSize: 14, width: 300,
+            }}
+          />
+        </div>
         <button
           onClick={() => { setEditing(null); setForm({ name: '', location: '', industry: '', type: '', website: '' }); setShowForm(true); }}
           style={{

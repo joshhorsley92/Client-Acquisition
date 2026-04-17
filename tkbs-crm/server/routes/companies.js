@@ -4,7 +4,17 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 
 router.get('/', (req, res) => {
-  const companies = req.db.prepare('SELECT * FROM companies ORDER BY created_at DESC').all();
+  let query = 'SELECT * FROM companies';
+  const params = [];
+
+  if (req.query.q) {
+    const term = `%${req.query.q}%`;
+    query += ' WHERE (name LIKE ? OR industry LIKE ? OR location LIKE ?)';
+    params.push(term, term, term);
+  }
+
+  query += ' ORDER BY created_at DESC';
+  const companies = req.db.prepare(query).all(...params);
   res.json({ companies });
 });
 

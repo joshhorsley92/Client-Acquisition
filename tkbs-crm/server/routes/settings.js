@@ -88,4 +88,46 @@ router.get('/audit-log', requireAdmin, (req, res) => {
   res.json({ logs, total, page, limit });
 });
 
+// ICP config (admin only) — read/write server/config/icp.json
+const fs = require('fs');
+const icpPath = require('path').join(__dirname, '..', 'config', 'icp.json');
+
+router.get('/icp', requireAdmin, (req, res) => {
+  try {
+    const raw = fs.readFileSync(icpPath, 'utf8');
+    res.json(JSON.parse(raw));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read ICP config: ' + err.message });
+  }
+});
+
+router.put('/icp', requireAdmin, (req, res) => {
+  const icp = req.body;
+  if (!icp || typeof icp !== 'object') {
+    return res.status(400).json({ error: 'Body must be a JSON object' });
+  }
+
+  // Validate scoring weights sum to 100
+  const weights = icp.scoring_weights || {};
+  const sum = (Number(weights.icp_match) || 0) + (Number(weights.readiness_signals) || 0) + (Number(weights.engagement) || 0);
+  if (sum !== 100) {
+    return res.status(400).json({ error: `Scoring weights must sum to 100 (currently ${sum})` });
+  }
+
+  // Validate revenue range
+  const rev = icp.revenue_range || {};
+  if (rev.min_usd != null && rev.max_usd != null && Number(rev.min_usd) >= Number(rev.max_usd)) {
+    return res.status(400).json({ error: 'Revenue min must be less than max' });
+  }
+
+  try {
+    icp.updated_at = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(icpPath, JSON.stringify(icp, null, 2) + '\n', 'utf8');
+    req.audit('icp_updated', 'config', null, {});
+    res.json(icp);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to write ICP config: ' + err.message });
+  }
+});
+
 module.exports = router;
