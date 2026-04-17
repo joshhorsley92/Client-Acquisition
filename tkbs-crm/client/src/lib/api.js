@@ -70,6 +70,8 @@ export const api = {
   getReportSources: () => request('/reports/sources'),
   getReportLostReasons: () => request('/reports/lost-reasons'),
   getReportMonthly: () => request('/reports/monthly'),
+  getReportVelocity: () => request('/reports/velocity'),
+  getReportTimeInvestment: () => request('/reports/time-investment'),
 
   // Search (cross-entity)
   search: (q, limit) => request(`/search?q=${encodeURIComponent(q || '')}${limit ? '&limit=' + limit : ''}`),

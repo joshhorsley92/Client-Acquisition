@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 function StatCard({ label, value, color }) {
   return (
@@ -12,11 +13,25 @@ function StatCard({ label, value, color }) {
   );
 }
 
+function roiColor(roi) {
+  if (roi == null) return '#94a3b8';
+  if (roi >= 3) return '#00D4AA';
+  if (roi >= 1) return '#E6A817';
+  return '#dc2626';
+}
+
+function formatStage(s) {
+  return (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function Reports() {
   const [summary, setSummary] = useState(null);
   const [funnel, setFunnel] = useState([]);
   const [sources, setSources] = useState([]);
   const [lostReasons, setLostReasons] = useState([]);
+  const [velocity, setVelocity] = useState([]);
+  const [conversion, setConversion] = useState([]);
+  const [timeData, setTimeData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,11 +40,16 @@ export default function Reports() {
       api.getReportFunnel(),
       api.getReportSources(),
       api.getReportLostReasons(),
-    ]).then(([sumData, funnelData, srcData, lostData]) => {
+      api.getReportVelocity(),
+      api.getReportTimeInvestment(),
+    ]).then(([sumData, funnelData, srcData, lostData, velData, timeInvData]) => {
       setSummary(sumData.summary);
       setFunnel(funnelData.funnel);
       setSources(srcData.sources);
       setLostReasons(lostData.reasons);
+      setVelocity(velData.velocity || []);
+      setConversion(velData.conversion || []);
+      setTimeData(timeInvData);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -39,30 +59,158 @@ export default function Reports() {
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>Reports</h1>
 
-      {/* Summary cards */}
+      {/* KPI Cards */}
       {summary && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
           <StatCard label="Active Deals" value={summary.activeDeals} />
-          <StatCard label="Pipeline Value/mo" value={`$${Number(summary.pipelineValue).toLocaleString()}`} />
+          <StatCard label="Pipeline Value" value={`$${Number(summary.pipelineValue).toLocaleString()}`} />
           <StatCard label="Win Rate" value={`${summary.winRate}%`} />
           <StatCard label="Avg Deal Cycle" value={summary.avgDealCycle ? `${summary.avgDealCycle}d` : '—'} />
         </div>
       )}
 
+      {/* Pipeline Velocity Chart */}
+      {velocity.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 16 }}>Average Days Per Stage</h3>
+          <ResponsiveContainer width="100%" height={Math.max(200, velocity.length * 48)}>
+            <BarChart data={velocity.map((v) => ({ ...v, name: formatStage(v.stage) }))} layout="vertical" margin={{ left: 100, right: 40 }}>
+              <XAxis type="number" tick={{ fontSize: 12, fill: '#64748B' }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#1B2838' }} width={100} />
+              <Tooltip
+                formatter={(value, name) => [`${value} days`, 'Avg']}
+                labelFormatter={(label) => label}
+                contentStyle={{ fontSize: 12, borderRadius: 4 }}
+              />
+              <Bar dataKey="avg_days" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                {velocity.map((entry, i) => (
+                  <Cell key={i} fill={entry.stage === 'closed_won' ? '#00D4AA' : '#1B2838'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+            {velocity.map((v) => (
+              <div key={v.stage} style={{ fontSize: 11, color: '#64748B' }}>
+                <strong style={{ color: '#1B2838' }}>{formatStage(v.stage)}:</strong> {v.avg_days}d avg ({v.deal_count} deals)
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Stage Conversion */}
+      {conversion.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 16 }}>Stage Conversion</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+            {conversion.map((c, i) => (
+              <React.Fragment key={i}>
+                {i === 0 && (
+                  <div style={{
+                    padding: '8px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                    background: '#1B2838', color: '#fff',
+                  }}>
+                    {formatStage(c.from)} ({c.from_count})
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: c.rate >= 0.5 ? '#00D4AA' : '#E6A817', fontWeight: 700, padding: '0 4px' }}>
+                  →{Math.round(c.rate * 100)}%→
+                </div>
+                <div style={{
+                  padding: '8px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                  background: c.to === 'closed_won' ? '#E6FAF5' : '#F7F8FA',
+                  color: c.to === 'closed_won' ? '#00D4AA' : '#1B2838',
+                  border: `1px solid ${c.to === 'closed_won' ? '#00D4AA' : '#E2E6EB'}`,
+                }}>
+                  {formatStage(c.to)} ({c.to_count})
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Deal Profitability Table */}
+      {timeData && (
+        <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Deal Profitability</h3>
+            {timeData.summary && (
+              <div style={{ fontSize: 12, color: '#64748B' }}>
+                Total: {timeData.summary.total_hours}h across all deals · ${timeData.summary.hourly_rate}/hr rate
+              </div>
+            )}
+          </div>
+
+          <div style={{ overflow: 'hidden', borderRadius: 8, border: '1px solid #E2E6EB' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#1B2838', color: '#fff' }}>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Company</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Stage</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Value</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Hours</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Cost</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeData.deals.map((d, i) => (
+                  <tr key={d.deal_id} style={{ background: i % 2 === 0 ? '#fff' : '#F7F8FA' }}>
+                    <td style={{ padding: '10px 16px', color: '#1B2838', fontWeight: 600 }}>
+                      {d.company_name || `Deal #${d.deal_id}`}
+                    </td>
+                    <td style={{ padding: '10px 16px', color: '#64748B' }}>
+                      {formatStage(d.stage)}
+                    </td>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', color: '#1B2838' }}>
+                      {d.estimated_value ? `$${Number(d.estimated_value).toLocaleString()}` : '—'}
+                    </td>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', color: d.total_hours > 0 ? '#1B2838' : '#94a3b8' }}>
+                      {d.total_hours > 0 ? `${d.total_hours}h` : '—'}
+                      {d.tasks_with_time > 0 && (
+                        <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 4 }}>
+                          ({d.tasks_with_time}/{d.tasks_total})
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', color: d.cost_at_rate > 0 ? '#1B2838' : '#94a3b8' }}>
+                      {d.cost_at_rate > 0 ? `$${d.cost_at_rate.toLocaleString()}` : '—'}
+                    </td>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: roiColor(d.roi) }}>
+                      {d.roi != null ? `${d.roi}x` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {timeData.summary && (
+            <div style={{
+              display: 'flex', gap: 24, marginTop: 12, fontSize: 12, color: '#64748B',
+            }}>
+              <div>Avg hours/deal: <strong style={{ color: '#1B2838' }}>{timeData.summary.avg_hours_per_deal}h</strong></div>
+              <div>Avg hours/closed won: <strong style={{ color: '#1B2838' }}>{timeData.summary.avg_hours_per_closed_won}h</strong></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Existing sections: funnel, sources, lost reasons, closed deals */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {/* Funnel */}
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Pipeline Funnel</h3>
           {funnel.map(f => (
             <div key={f.stage} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F7F8FA' }}>
-              <span style={{ fontSize: 13 }}>{f.stage.replace('_', ' ')}</span>
+              <span style={{ fontSize: 13 }}>{formatStage(f.stage)}</span>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#00D4AA' }}>{f.count}</span>
             </div>
           ))}
           {funnel.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No data yet.</div>}
         </div>
 
-        {/* Sources */}
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Deals by Source</h3>
           {sources.map(s => (
@@ -74,7 +222,6 @@ export default function Reports() {
           {sources.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No data yet.</div>}
         </div>
 
-        {/* Lost Reasons */}
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Lost Deal Reasons</h3>
           {lostReasons.map(r => (
@@ -86,7 +233,6 @@ export default function Reports() {
           {lostReasons.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No lost deals yet.</div>}
         </div>
 
-        {/* Quick stats */}
         {summary && (
           <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Closed Deals</h3>

@@ -66,6 +66,7 @@ router.patch('/:id', (req, res) => {
   if (req.body.description !== undefined) { updates.push('description = ?'); values.push(req.body.description); }
   if (req.body.due_at !== undefined) { updates.push('due_at = ?'); values.push(req.body.due_at); }
   if (req.body.notes !== undefined) { updates.push('notes = ?'); values.push(req.body.notes); }
+  if (req.body.time_minutes !== undefined) { updates.push('time_minutes = ?'); values.push(req.body.time_minutes === null ? null : parseInt(req.body.time_minutes) || 0); }
   if (req.body.status !== undefined) {
     updates.push('status = ?');
     values.push(req.body.status);

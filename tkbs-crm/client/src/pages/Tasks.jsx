@@ -103,6 +103,36 @@ export default function Tasks() {
             </div>
             {expandedTask === t.id && (
               <div style={{ padding: '8px 12px 12px 44px', background: '#F7F8FA', borderTop: '1px solid #E2E6EB' }}>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+                  <div style={{ flex: '0 0 160px' }}>
+                    <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Time spent (min)</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        key={`time-${t.id}`}
+                        type="number"
+                        min="0"
+                        defaultValue={t.time_minutes || ''}
+                        onBlur={(e) => {
+                          const val = e.target.value === '' ? null : parseInt(e.target.value) || 0;
+                          if (val !== (t.time_minutes || null)) {
+                            api.updateTask(t.id, { time_minutes: val }).then(load);
+                          }
+                        }}
+                        placeholder="0"
+                        style={{
+                          width: 80, padding: '6px 8px', border: '1px solid #E2E6EB',
+                          borderRadius: 4, fontSize: 12, textAlign: 'center',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      {t.time_minutes > 0 && (
+                        <span style={{ fontSize: 11, color: '#64748B' }}>
+                          = {Math.round((t.time_minutes / 60) * 10) / 10}h
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
                 <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
                 <textarea
                   key={`notes-${t.id}`}

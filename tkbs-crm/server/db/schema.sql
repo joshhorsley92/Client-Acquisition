@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   auto_generated INTEGER NOT NULL DEFAULT 0,
   template_key TEXT,
   notes TEXT,
+  time_minutes INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT
 );

@@ -517,6 +517,26 @@ export default function DealDetail() {
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (
         <div>
+          {(() => {
+            const totalMinutes = tasks.reduce((s, t) => s + (Number(t.time_minutes) || 0), 0);
+            const tracked = tasks.filter((t) => t.time_minutes > 0).length;
+            if (totalMinutes === 0) return null;
+            const hours = Math.round((totalMinutes / 60) * 10) / 10;
+            const cost = Math.round((totalMinutes / 60) * 100);
+            return (
+              <div style={{
+                background: '#E6FAF5', border: '1px solid #00D4AA', borderRadius: 6,
+                padding: '10px 14px', marginBottom: 12, fontSize: 13,
+                display: 'flex', gap: 16, alignItems: 'center',
+              }}>
+                <span style={{ color: '#1B2838', fontWeight: 600 }}>⏱ Time invested:</span>
+                <span style={{ color: '#00D4AA', fontWeight: 700 }}>{hours}h</span>
+                <span style={{ color: '#64748B', fontSize: 12 }}>
+                  ({tracked} of {tasks.length} tasks tracked) · ${cost.toLocaleString()} at $100/hr
+                </span>
+              </div>
+            );
+          })()}
           {tasks.length === 0 && <div style={{ fontSize: 13, color: '#64748B' }}>No tasks yet.</div>}
           {tasks.map((t) => (
             <div key={t.id} style={{
@@ -569,6 +589,32 @@ export default function DealDetail() {
               </div>
               {expandedTask === t.id && (
                 <div style={{ padding: '8px 12px 12px 40px', background: '#F7F8FA', borderTop: '1px solid #E2E6EB' }}>
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Time spent (min)</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        key={`time-${t.id}`}
+                        type="number" min="0"
+                        defaultValue={t.time_minutes || ''}
+                        onBlur={(e) => {
+                          const v = e.target.value === '' ? null : parseInt(e.target.value) || 0;
+                          if (v !== (t.time_minutes || null)) {
+                            api.updateTask(t.id, { time_minutes: v }).then(loadDeal);
+                          }
+                        }}
+                        placeholder="0"
+                        style={{
+                          width: 100, padding: '6px 8px', border: '1px solid #E2E6EB',
+                          borderRadius: 4, fontSize: 12, fontFamily: 'inherit',
+                        }}
+                      />
+                      {t.time_minutes > 0 && (
+                        <span style={{ fontSize: 11, color: '#64748B' }}>
+                          = {Math.round((t.time_minutes / 60) * 10) / 10}h · ${Math.round((t.time_minutes / 60) * 100)} at $100/hr
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <label style={{ fontSize: 11, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
                   <textarea
                     key={`notes-${t.id}`}

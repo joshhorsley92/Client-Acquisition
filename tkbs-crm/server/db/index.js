@@ -24,6 +24,7 @@ function initDb() {
 
   // Migrations - add columns if they don't exist
   try { database.exec('ALTER TABLE tasks ADD COLUMN notes TEXT'); } catch(e) { /* already exists */ }
+  try { database.exec('ALTER TABLE tasks ADD COLUMN time_minutes INTEGER'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
   try { database.exec('ALTER TABLE deals ADD COLUMN fit_score INTEGER'); } catch(e) { /* already exists */ }
