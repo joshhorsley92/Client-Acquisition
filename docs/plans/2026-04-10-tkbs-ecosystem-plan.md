@@ -324,7 +324,63 @@ The Dashboard stays on public internet (Supabase cloud) because it's meant to be
 
 ---
 
-## 10. Current status (updated 2026-04-16 — end of day 5)
+## 10. Current status (updated 2026-04-17 — end of day 6)
+
+### Day 6 — big UX day
+
+Wrapped up Initiative 3 infrastructure, knocked out the entire Option D real-use overhaul, finished the analytics half of Initiative 2, and re-fired Stage 5 against the live Dashboard. The CRM is now fully usable day-to-day for both Joe and Josh.
+
+### Day 6 commits (all pushed to main)
+
+| Commit | Content |
+|---|---|
+| `69fc12a` | Phase 4 auto-start on Windows login + power settings (Tailscale deployment finished) |
+| `d1ca144` | Stage 5 CHECK constraint fix — re-fired Wren & Ivy activation, now has `launch_client_id` populated |
+| `dafd501` | **Tier 1 UX overhaul** — Home dashboard, global search (Ctrl+K), pipeline filters, deal calls tab (1017 insertions) |
+| `273f563` | **Tier 2 UX quick wins** — Contacts/Companies search, ICP editor, activity filter, script merge-fields (538 insertions) |
+| `69dda6e` | **Pipeline velocity chart + task time tracking → deal profitability** (701 insertions, Initiative 2 analytics mostly complete) |
+| `4688e09` | Reports error boundaries + Ctrl+K label for Windows |
+
+### Initiative 2 status
+
+| Item | Status |
+|---|---|
+| Fit Score engine | ✅ |
+| ICP config source-of-truth | ✅ |
+| ICP editor UI (admin-only) | ✅ |
+| Pipeline velocity chart | ✅ |
+| Stage conversion funnel | ✅ |
+| Task time tracking | ✅ |
+| Deal profitability table (ROI) | ✅ |
+| Channel ROI analytics | ⏳ not yet |
+| Effort-vs-Value scatter chart | ⏳ not yet |
+
+### Pickup for tomorrow — remaining backlog
+
+**Bite-sized UX finishes:**
+- Task templates + quick-add on Home dashboard (~2-3 hrs)
+- Transcript speaker labels on call detail (~2-3 hrs)
+- Notification system — in-app/email alerts for stage changes, overdue tasks (~3-4 hrs)
+
+**Bigger features:**
+- **Auto-feed leads from Python scrapers → CRM** (Joe flagged this as wanted soon) — wrap `push_leads_to_crm` in a scheduled runner + scraper-queue UI so the prospect pipeline keeps filling automatically. ~1 day.
+- **B — Nightly CRM↔Dashboard sync** — retry failed pushes, pull engagement data back to feed Fit Score. ~1 day.
+- **C — Whisper auto-transcription** — kills the manual paste step in call intake. ~1 day.
+
+**Channel ROI + Effort-vs-Value chart** (finishes Initiative 2) — ~1 day if done together.
+
+### Known state at session close
+
+- Dev server: likely running (Vite + Express via `npm run dev`)
+- Tailscale serve: configured, survives reboots
+- Prod server (via VBS Startup shortcut): auto-launches when Joe logs into Windows
+- All tests: 108/108 Node, 21/21 Python critical paths — no regressions
+- Wren & Ivy seed: still in prod DB + on Dashboard (test data, clean up when ready)
+- Josh's Dashboard test user `megan@wrenandivyboutique.com`: still in prod Supabase, tier=launch, has launch_client
+
+---
+
+## 10-OLD-day5. Historical status (2026-04-16 — end of day 5)
 
 ### Day 5 progress — Initiative 3 (C2) shared access
 
