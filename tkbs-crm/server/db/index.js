@@ -49,15 +49,42 @@ function initDb() {
     }
   } catch(e) {}
 
-  // Add closed_won Dashboard-activation action if missing (Stage 5 migration)
+  // Stage 5 migration: add 'activate_launch_on_dashboard' to the stage_actions
+  // CHECK constraint (SQLite requires table recreation) + seed the row.
   try {
     const activateAction = database.prepare(
       "SELECT id FROM stage_actions WHERE stage = 'closed_won' AND action_type = 'activate_launch_on_dashboard'"
     ).get();
     if (!activateAction) {
-      database.prepare("INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES (?, ?, ?, ?)").run(
-        'closed_won', 'activate_launch_on_dashboard', '{}', 1
-      );
+      try {
+        database.prepare("INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES (?, ?, ?, ?)").run(
+          'closed_won', 'activate_launch_on_dashboard', '{}', 1
+        );
+      } catch (constraintErr) {
+        // CHECK constraint doesn't include the new type — recreate the table
+        if (String(constraintErr).includes('CHECK')) {
+          database.pragma('foreign_keys = OFF');
+          database.exec(`
+            BEGIN;
+            CREATE TABLE stage_actions_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              stage TEXT NOT NULL,
+              action_type TEXT NOT NULL CHECK(action_type IN ('create_tasks', 'start_cadence', 'trigger_skill', 'record', 'activate_launch_on_dashboard')),
+              config TEXT NOT NULL DEFAULT '{}',
+              enabled INTEGER NOT NULL DEFAULT 1,
+              sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO stage_actions_new SELECT * FROM stage_actions;
+            DROP TABLE stage_actions;
+            ALTER TABLE stage_actions_new RENAME TO stage_actions;
+            COMMIT;
+          `);
+          database.pragma('foreign_keys = ON');
+          database.prepare("INSERT INTO stage_actions (stage, action_type, config, sort_order) VALUES (?, ?, ?, ?)").run(
+            'closed_won', 'activate_launch_on_dashboard', '{}', 1
+          );
+        }
+      }
     }
   } catch(e) {}
 
