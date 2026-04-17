@@ -64,7 +64,7 @@ export default function Layout() {
         >
           <span style={{ fontSize: 14 }}>🔍</span>
           <span style={{ flex: 1 }}>Search...</span>
-          <span style={{ fontSize: 11, color: '#64748B', background: '#1B2838', padding: '1px 6px', borderRadius: 3 }}>⌘K</span>
+          <span style={{ fontSize: 11, color: '#64748B', background: '#1B2838', padding: '1px 6px', borderRadius: 3 }}>Ctrl+K</span>
         </button>
 
         <div style={{ flex: 1, padding: '8px 0' }}>

@@ -2,6 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
+// Catches render errors in child components so a single broken chart
+// doesn't blank the whole page.
+class SectionBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('Reports section error:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{
+          background: '#FEE2E2', border: '1px solid #dc2626', color: '#dc2626',
+          borderRadius: 8, padding: 16, marginBottom: 24, fontSize: 13,
+        }}>
+          <strong>Section crashed:</strong> {this.state.error.message || String(this.state.error)}
+          <div style={{ fontSize: 11, marginTop: 4, opacity: 0.7 }}>Check the browser console for the full stack.</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function StatCard({ label, value, color }) {
   return (
     <div style={{
@@ -35,21 +57,25 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Load each endpoint independently so one failure doesn't blank the page
+    const safe = (promise) => promise.catch((err) => { console.error('Report fetch failed:', err); return null; });
     Promise.all([
-      api.getReportSummary(),
-      api.getReportFunnel(),
-      api.getReportSources(),
-      api.getReportLostReasons(),
-      api.getReportVelocity(),
-      api.getReportTimeInvestment(),
+      safe(api.getReportSummary()),
+      safe(api.getReportFunnel()),
+      safe(api.getReportSources()),
+      safe(api.getReportLostReasons()),
+      safe(api.getReportVelocity()),
+      safe(api.getReportTimeInvestment()),
     ]).then(([sumData, funnelData, srcData, lostData, velData, timeInvData]) => {
-      setSummary(sumData.summary);
-      setFunnel(funnelData.funnel);
-      setSources(srcData.sources);
-      setLostReasons(lostData.reasons);
-      setVelocity(velData.velocity || []);
-      setConversion(velData.conversion || []);
-      setTimeData(timeInvData);
+      if (sumData) setSummary(sumData.summary);
+      if (funnelData) setFunnel(funnelData.funnel || []);
+      if (srcData) setSources(srcData.sources || []);
+      if (lostData) setLostReasons(lostData.reasons || []);
+      if (velData) {
+        setVelocity(velData.velocity || []);
+        setConversion(velData.conversion || []);
+      }
+      if (timeInvData) setTimeData(timeInvData);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -70,37 +96,50 @@ export default function Reports() {
       )}
 
       {/* Pipeline Velocity Chart */}
-      {velocity.length > 0 && (
-        <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 16 }}>Average Days Per Stage</h3>
-          <ResponsiveContainer width="100%" height={Math.max(200, velocity.length * 48)}>
-            <BarChart data={velocity.map((v) => ({ ...v, name: formatStage(v.stage) }))} layout="vertical" margin={{ left: 100, right: 40 }}>
-              <XAxis type="number" tick={{ fontSize: 12, fill: '#64748B' }} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#1B2838' }} width={100} />
-              <Tooltip
-                formatter={(value, name) => [`${value} days`, 'Avg']}
-                labelFormatter={(label) => label}
-                contentStyle={{ fontSize: 12, borderRadius: 4 }}
-              />
-              <Bar dataKey="avg_days" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                {velocity.map((entry, i) => (
-                  <Cell key={i} fill={entry.stage === 'closed_won' ? '#00D4AA' : '#1B2838'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
-            {velocity.map((v) => (
-              <div key={v.stage} style={{ fontSize: 11, color: '#64748B' }}>
-                <strong style={{ color: '#1B2838' }}>{formatStage(v.stage)}:</strong> {v.avg_days}d avg ({v.deal_count} deals)
-              </div>
-            ))}
+      <SectionBoundary>
+        {Array.isArray(velocity) && velocity.length > 0 && (
+          <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 16 }}>Average Days Per Stage</h3>
+            <div style={{ width: '100%', height: Math.max(200, velocity.length * 48) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={velocity.map((v) => ({
+                    name: formatStage(v.stage),
+                    avg_days: Number(v.avg_days) || 0,
+                    deal_count: v.deal_count,
+                    stage: v.stage,
+                  }))}
+                  layout="vertical"
+                  margin={{ left: 100, right: 40, top: 10, bottom: 10 }}
+                >
+                  <XAxis type="number" tick={{ fontSize: 12, fill: '#64748B' }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#1B2838' }} width={100} />
+                  <Tooltip
+                    formatter={(value) => [`${value} days`, 'Avg']}
+                    contentStyle={{ fontSize: 12, borderRadius: 4 }}
+                  />
+                  <Bar dataKey="avg_days" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                    {velocity.map((entry, i) => (
+                      <Cell key={`cell-${entry.stage}-${i}`} fill={entry.stage === 'closed_won' ? '#00D4AA' : '#1B2838'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+              {velocity.map((v) => (
+                <div key={v.stage} style={{ fontSize: 11, color: '#64748B' }}>
+                  <strong style={{ color: '#1B2838' }}>{formatStage(v.stage)}:</strong> {v.avg_days}d avg ({v.deal_count} deals)
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SectionBoundary>
 
       {/* Stage Conversion */}
-      {conversion.length > 0 && (
+      <SectionBoundary>
+        {Array.isArray(conversion) && conversion.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 0, marginBottom: 16 }}>Stage Conversion</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
@@ -129,10 +168,12 @@ export default function Reports() {
             ))}
           </div>
         </div>
-      )}
+        )}
+      </SectionBoundary>
 
       {/* Deal Profitability Table */}
-      {timeData && (
+      <SectionBoundary>
+        {timeData && Array.isArray(timeData.deals) && (
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20, marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Deal Profitability</h3>
@@ -196,7 +237,8 @@ export default function Reports() {
             </div>
           )}
         </div>
-      )}
+        )}
+      </SectionBoundary>
 
       {/* Existing sections: funnel, sources, lost reasons, closed deals */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
