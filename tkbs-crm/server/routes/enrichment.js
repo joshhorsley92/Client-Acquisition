@@ -1,15 +1,8 @@
 const router = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
+const { kickoffEnrichment } = require('../services/enrichment-runner');
 
 router.use(requireAuth);
-
-// Phase 1 stub. Phase 2 will wire this to the Python pipeline at
-// enrichment/pipeline.py (email_finder, Etsy/Kickstarter/county scrapers) and
-// fan the result back into the client row.
-//
-// Contract kept stable so the UI can be built against it now:
-//   POST /api/enrichment/run       { client_id }      → { status, client }
-//   GET  /api/enrichment/:clientId                    → { status, enrichment_data }
 
 router.post('/run', (req, res) => {
   const { client_id } = req.body;
@@ -18,15 +11,24 @@ router.post('/run', (req, res) => {
   const client = req.db.prepare('SELECT * FROM clients WHERE id = ?').get(client_id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
+  if (client.enrichment_status === 'running') {
+    return res.status(409).json({
+      error: 'Enrichment already in progress for this client',
+      status: 'running',
+    });
+  }
+
+  // Flip to running synchronously so the response + any concurrent read sees
+  // the new state. The service then handles the async spawn.
   req.db.prepare(
-    "UPDATE clients SET enrichment_status = 'none', updated_at = datetime('now') WHERE id = ?"
+    "UPDATE clients SET enrichment_status = 'running', updated_at = datetime('now') WHERE id = ?"
   ).run(client_id);
 
-  res.json({
-    status: 'pending',
-    message: 'Enrichment pipeline not yet wired (Phase 2). Client unchanged.',
-    client,
-  });
+  // Fire-and-forget — never await. The service captures errors into the row.
+  kickoffEnrichment(req.db, client_id);
+
+  const updated = req.db.prepare('SELECT * FROM clients WHERE id = ?').get(client_id);
+  res.json({ status: 'running', client: updated });
 });
 
 router.get('/:clientId', (req, res) => {

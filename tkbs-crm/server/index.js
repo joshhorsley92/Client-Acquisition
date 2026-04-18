@@ -37,6 +37,17 @@ function createApp(testDb) {
     app.use((req, res, next) => { req.db = testDb; next(); });
   } else {
     const db = initDb();
+
+    // Boot-time recovery: any enrichment stuck in 'running' across a restart
+    // gets flipped to 'failed' so the UI stops spinning forever.
+    try {
+      const { resetStaleRunning } = require('./services/enrichment-runner');
+      const reset = resetStaleRunning(db);
+      if (reset > 0) console.log(`Reset ${reset} stale enrichment runs to 'failed'.`);
+    } catch (e) {
+      console.warn('Enrichment stale-reset skipped:', e.message);
+    }
+
     app.use((req, res, next) => { req.db = db; next(); });
   }
 

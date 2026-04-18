@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
 const { scoreClient } = require('../services/fit-score');
+const { kickoffEnrichment } = require('../services/enrichment-runner');
 
 router.use(requireAuth);
 
@@ -115,6 +116,19 @@ router.post('/', (req, res) => {
     client.fit_score_breakdown = JSON.stringify({ breakdown: fit.breakdown, flags: fit.flags });
     try { req.audit('fit_score_computed', 'client', client.id, { score: fit.score }); } catch (e) {}
   } catch (e) { /* non-fatal */ }
+
+  // Auto-kick enrichment if we have a website to scrape. Fire-and-forget —
+  // the runner captures errors into the client row. Skipped in tests via
+  // DISABLE_AUTO_ENRICHMENT=1 so the suite doesn't spawn Python.
+  if (client.website && process.env.DISABLE_AUTO_ENRICHMENT !== '1') {
+    try {
+      req.db.prepare(
+        "UPDATE clients SET enrichment_status = 'running', updated_at = datetime('now') WHERE id = ?"
+      ).run(client.id);
+      client.enrichment_status = 'running';
+      kickoffEnrichment(req.db, client.id);
+    } catch (e) { /* non-fatal */ }
+  }
 
   res.status(201).json({ client });
 });
