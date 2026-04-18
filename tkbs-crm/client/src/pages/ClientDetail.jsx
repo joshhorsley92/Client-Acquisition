@@ -482,7 +482,6 @@ function EngagementRow({ engagement, onChange }) {
         {engagement.status_changed_at && ` · status changed ${fmtDate(engagement.status_changed_at)}`}
         {engagement.closed_at && ` · closed ${fmtDate(engagement.closed_at)}`}
         {engagement.lost_reason && ` · lost: ${engagement.lost_reason}`}
-        {engagement.launch_activated_at && ` · launch_client ${engagement.launch_client_id}`}
       </div>
       {engagement.notes && (
         <div style={{ marginTop: 8, fontSize: 13, color: '#475569', whiteSpace: 'pre-wrap' }}>
@@ -611,7 +610,7 @@ function CallsTab({ clientId, clientName }) {
                 {c.duration_minutes && <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>{c.duration_minutes} min</span>}
               </div>
               <div style={{ fontSize: 11, color: '#64748B' }}>
-                {c.pushed_to_dashboard_at ? 'On Dashboard' : c.review_status || '—'}
+                {c.review_status || '—'}
               </div>
             </div>
             {c.notes && <div style={{ fontSize: 12, color: '#64748B', marginTop: 6 }}>{c.notes}</div>}

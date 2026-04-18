@@ -16,11 +16,9 @@ function getDb() {
   return db;
 }
 
-// v2 clean-slate: on first boot after the crm-v2 cutover, drop every v1 data
-// table and anything whose columns reference the removed deals table. Users,
-// audit_log, outbound_webhooks, and integration_settings survive. The new
-// schema.sql recreates everything else with the clients+engagements model.
-const V1_TABLES_TO_DROP = [
+// Data tables the clean-slate migrations wipe. users, audit_log,
+// outbound_webhooks, and integration_settings survive across schema shifts.
+const V2_DATA_TABLES = [
   'companies',
   'contacts',
   'deals',
@@ -28,6 +26,7 @@ const V1_TABLES_TO_DROP = [
   'activities',
   'documents',
   'stage_actions',
+  'status_actions',
   'script_templates',
   'generation_jobs',
   'email_messages',
@@ -35,16 +34,41 @@ const V1_TABLES_TO_DROP = [
   'call_recordings',
 ];
 
-function wipeV1IfPresent(database) {
-  const hasV1 = database
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('companies','contacts','deals','tasks')")
-    .all().length > 0;
-  if (!hasV1) return;
+function hasColumn(database, table, column) {
+  try {
+    const row = database.prepare(
+      "SELECT 1 FROM pragma_table_info(?) WHERE name = ?"
+    ).get(table, column);
+    return !!row;
+  } catch (e) { return false; }
+}
+
+function hasTable(database, name) {
+  const row = database.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?"
+  ).get(name);
+  return !!row;
+}
+
+// Returns true when the on-disk schema is behind the current source.
+// Triggers: any v1 table present; any dashboard column still present;
+// the status_actions table present (removed when we cut Dashboard).
+function isSchemaOutOfDate(database) {
+  if (hasTable(database, 'companies') || hasTable(database, 'contacts') ||
+      hasTable(database, 'deals') || hasTable(database, 'tasks')) return true;
+  if (hasTable(database, 'stage_actions') || hasTable(database, 'status_actions')) return true;
+  if (hasColumn(database, 'engagements', 'dashboard_user_id')) return true;
+  if (hasColumn(database, 'call_recordings', 'dashboard_user_id')) return true;
+  return false;
+}
+
+function wipeOutOfDateTables(database) {
+  if (!isSchemaOutOfDate(database)) return;
 
   database.pragma('foreign_keys = OFF');
   try {
     const tx = database.transaction(() => {
-      for (const table of V1_TABLES_TO_DROP) {
+      for (const table of V2_DATA_TABLES) {
         database.exec(`DROP TABLE IF EXISTS ${table}`);
       }
     });
@@ -57,7 +81,7 @@ function wipeV1IfPresent(database) {
 function initDb() {
   const database = getDb();
 
-  wipeV1IfPresent(database);
+  wipeOutOfDateTables(database);
 
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
   database.exec(schema);

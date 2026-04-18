@@ -4,9 +4,7 @@ import { api } from '../lib/api';
 
 function StatusBadge({ call }) {
   let label, bg, color, border;
-  if (call.pushed_to_dashboard_at) {
-    label = 'On Dashboard'; bg = '#E6FAF5'; color = '#00D4AA'; border = '#00D4AA';
-  } else if (call.review_status === 'approved') {
+  if (call.review_status === 'approved') {
     label = 'Approved'; bg = '#E6FAF5'; color = '#00D4AA'; border = '#00D4AA';
   } else if (call.review_status === 'pending') {
     label = 'Ready to review'; bg = '#FFF3E0'; color = '#E6A817'; border = '#E6A817';

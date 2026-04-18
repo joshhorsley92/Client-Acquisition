@@ -25,7 +25,7 @@ function confidenceColor(conf) {
   return { bg: '#FEE2E2', text: '#dc2626', border: '#dc2626' };
 }
 
-// Required fields per Dashboard schema (minimum for "complete")
+// Fields we treat as "required" to consider the Brand Profile complete.
 const REQUIRED = new Set([
   'business_name', 'industry',
   'customer_avatar.name', 'customer_avatar.pain_points',
@@ -101,7 +101,7 @@ function FieldRow({ label, path, sidecar, excluded, onToggleExclude, required, c
             color: excluded ? '#00D4AA' : '#94a3b8', cursor: 'pointer', padding: 0,
             fontWeight: 600,
           }}
-          title={excluded ? 'Include this field when pushing to Dashboard' : 'Exclude this field from Dashboard push'}
+          title={excluded ? 'Include this field when feeding it to automations' : 'Exclude this field from automation generation'}
         >
           {excluded ? '+ Include' : '× Reject'}
         </button>

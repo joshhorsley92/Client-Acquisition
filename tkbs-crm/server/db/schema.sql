@@ -59,10 +59,6 @@ CREATE TABLE IF NOT EXISTS engagements (
   closed_value REAL,
   lost_reason TEXT,
   notes TEXT,
-  dashboard_user_id TEXT,
-  dashboard_org_id TEXT,
-  launch_client_id TEXT,
-  launch_activated_at TEXT,
   owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   opened_at TEXT NOT NULL DEFAULT (datetime('now')),
   status_changed_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -100,17 +96,6 @@ CREATE TABLE IF NOT EXISTS documents (
   file_name TEXT NOT NULL,
   generated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Single remaining automation: fire on engagement status transition.
--- v2 ships with one configured action (activate_launch_on_dashboard on 'won').
-CREATE TABLE IF NOT EXISTS status_actions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  status TEXT NOT NULL,
-  action_type TEXT NOT NULL CHECK(action_type IN ('activate_launch_on_dashboard')),
-  config TEXT NOT NULL DEFAULT '{}',
-  enabled INTEGER NOT NULL DEFAULT 1,
-  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 -- Scripts are pruned in seed-scripts.js to only Brand Profile intake, proposal
@@ -224,9 +209,6 @@ CREATE TABLE IF NOT EXISTS call_recordings (
   notes TEXT,
   extracted_profile_json TEXT,
   review_status TEXT NOT NULL DEFAULT 'none' CHECK(review_status IN ('none', 'pending', 'approved', 'rejected')),
-  pushed_to_dashboard_at TEXT,
-  dashboard_user_id TEXT,
-  dashboard_org_id TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

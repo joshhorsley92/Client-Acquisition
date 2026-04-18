@@ -154,8 +154,8 @@ Say the price. Wait. Do not fill the silence — let them think.
 Fire this immediately after the engagement moves to Won.
 
 - [ ] Send welcome email (kickoff meeting link + what to expect in week one)
-- [ ] Confirm Brand Profile was pushed to Dashboard (/calls/:id/extract-brand-profile if not)
-- [ ] Verify launch_client was created on Dashboard (check engagement.launch_client_id)
+- [ ] Confirm Brand Profile was extracted from the discovery call (/calls/:id/extract-brand-profile)
+- [ ] Kick off internal delivery workflow (separate tool — no longer auto-activated from the CRM)
 - [ ] Invoice sent for deposit / first payment
 - [ ] Shared Drive / Notion folder created and shared
 - [ ] Internal kickoff: brief the delivery team on the Brand Profile + constraints

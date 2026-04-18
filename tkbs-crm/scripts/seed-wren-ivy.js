@@ -1,6 +1,6 @@
 /**
  * Seed a fake "ideal client" deal using Wren & Ivy Boutique — a fictional
- * client pulled from the TKBS Dashboard role-play docs. Fleshes out every
+ * client pulled from TKBS role-play docs. Fleshes out every
  * section of the system so Joe can see what a close-to-ideal client looks
  * like end-to-end.
  *
@@ -212,7 +212,7 @@ function seedActivities(dealId, contactId, ownerId) {
     { type: 'note',    content: 'Research: reviewed her Shopify site, Instagram engagement, Google reviews. Strong in-person rep.', days_ago: 5 },
     { type: 'meeting', content: 'Proposal walkthrough scheduled for day-2', days_ago: 4 },
     { type: 'call',    content: 'Proposal walkthrough (45 min) — Megan wants to move forward. Ready to sign.', days_ago: 2 },
-    { type: 'note',    content: 'Brand Profile extracted from discovery call transcript — 100% complete, ready to push to Dashboard.', days_ago: 1 },
+    { type: 'note',    content: 'Brand Profile extracted from discovery call transcript — 100% complete, ready to feed the Automations flow for proposal generation.', days_ago: 1 },
   ];
 
   const insert = db.prepare(`

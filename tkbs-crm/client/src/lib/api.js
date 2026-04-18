@@ -88,7 +88,6 @@ export const api = {
   updateCall: (id, body) => request(`/calls/${id}`, { method: 'PATCH', body }),
   deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
   extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
-  pushCallToDashboard: (id) => request(`/calls/${id}/push-to-dashboard`, { method: 'POST' }),
   // Multipart create — FormData, not JSON.
   createCall: async (formData) => {
     const res = await fetch(`/api/calls`, {

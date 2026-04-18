@@ -1,16 +1,15 @@
-// Brand Profile extractor — Initiative 1 Stage 3.
-// Takes a call transcript, asks Claude to synthesize it into a Brand Profile
-// matching the TKBS Dashboard schema exactly (from types/database.ts).
+// Brand Profile extractor.
+// Takes a call transcript, asks Claude to synthesize it into a structured
+// Brand Profile. The output feeds the Automations flow (proposal generation)
+// via services/brand-profile-loader.js.
 //
 // Returns both the profile fields AND a sidecar with confidence + source quote
-// per field, so Josh can verify each extracted value during review (Stage 4).
+// per field, so Josh can verify each extracted value during review.
 
 const Anthropic = require('@anthropic-ai/sdk');
 
-// Mirrors the Dashboard's BrandProfile type (types/database.ts). Kept here as
-// a JSON schema so the prompt can enforce output structure. Any change to the
-// Dashboard schema must be reflected here OR we risk producing profiles the
-// Dashboard rejects on PATCH /api/brand.
+// JSON schema the prompt enforces on Claude's output. The shape captures the
+// essentials we care about for brand-profile-grounded content generation.
 const BRAND_PROFILE_SCHEMA = {
   type: 'object',
   properties: {
@@ -86,7 +85,7 @@ Your task:
 
 Return a single JSON object with two top-level keys:
 
-1. \`profile\` — the extracted Brand Profile matching the Dashboard schema.
+1. \`profile\` — the extracted Brand Profile in the shape below.
 2. \`sidecar\` — a parallel object with the same field paths, where each leaf value is either \`null\` (if field wasn't extracted) OR an object \`{ "confidence": 0.0-1.0, "source_quote": "verbatim quote from transcript" }\`.
 
 ## Brand Profile schema
@@ -193,7 +192,7 @@ async function extractBrandProfile(transcript, options = {}) {
     throw new Error('Claude output missing required "profile" key');
   }
 
-  // Validate required Dashboard fields exist as keys (may be null — that's ok)
+  // Validate required top-level fields exist as keys (may be null — that's ok)
   const expectedKeys = [
     'business_name', 'industry', 'customer_avatar',
     'brand_personality', 'visual_identity', 'brand_voice',
@@ -215,7 +214,7 @@ async function extractBrandProfile(transcript, options = {}) {
 }
 
 /**
- * Compute completion percent matching the Dashboard's trigger logic.
+ * Compute a completion percent for the UI badge / automations readiness gate.
  * Minimum required: business_name, industry, customer_avatar.name,
  * customer_avatar.pain_points, brand_personality.traits,
  * visual_identity.primary_color, brand_voice.tone.

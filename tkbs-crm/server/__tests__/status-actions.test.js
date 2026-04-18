@@ -23,29 +23,26 @@ describe('executeStatusActions', () => {
   beforeEach(() => { db = setupTestDb(); });
   afterEach(() => { db.close(); });
 
-  test('returns no actions for statuses with no configured action', () => {
+  test('returns notification side effects (Slack + webhooks) — no external actions', () => {
     const result = executeStatusActions(db, 1, 'working', 1);
-    expect(result.actions).toEqual([]);
-  });
-
-  test('fires activate_launch_on_dashboard on won (seeded in real db, manual insert in test)', () => {
-    db.prepare(
-      `INSERT INTO status_actions (status, action_type, config, sort_order)
-       VALUES ('won', 'activate_launch_on_dashboard', '{}', 0)`
-    ).run();
-
-    const result = executeStatusActions(db, 1, 'won', 1);
     const kinds = result.actions.map((a) => a.type);
-    expect(kinds).toContain('activate_launch_on_dashboard');
+    expect(kinds).toContain('slack_notification');
+    expect(kinds).toContain('webhook_dispatch');
   });
 
-  test('honors enabled=0 and skips disabled actions', () => {
-    db.prepare(
-      `INSERT INTO status_actions (status, action_type, config, enabled, sort_order)
-       VALUES ('won', 'activate_launch_on_dashboard', '{}', 0, 0)`
-    ).run();
-
+  test('emits engagement.won event on won transition', () => {
     const result = executeStatusActions(db, 1, 'won', 1);
-    expect(result.actions).toEqual([]);
+    const hook = result.actions.find((a) => a.type === 'webhook_dispatch');
+    expect(hook?.event).toBe('engagement.won');
+  });
+
+  test('emits engagement.created on new transition', () => {
+    const result = executeStatusActions(db, 1, 'new', 1);
+    const hook = result.actions.find((a) => a.type === 'webhook_dispatch');
+    expect(hook?.event).toBe('engagement.created');
+  });
+
+  test('swallows a missing engagement gracefully', () => {
+    expect(() => executeStatusActions(db, 999, 'working', 1)).not.toThrow();
   });
 });
