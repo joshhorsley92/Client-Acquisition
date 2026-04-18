@@ -31,26 +31,28 @@ async function postNotification(db, { text, blocks, channel }) {
   }
 }
 
-function buildStageChangeNotification(deal, company, contact, oldStage, newStage, user) {
-  const emoji = newStage === 'closed_won' ? '🎉' : newStage === 'closed_lost' ? '❌' : '📋';
-  const value = deal.estimated_value ? ` — $${Number(deal.estimated_value).toLocaleString()}/mo` : '';
+function buildStatusChangeNotification(engagement, client, newStatus, user) {
+  const emoji = newStatus === 'won' ? '🎉' : newStatus === 'lost' ? '❌' : '📋';
+  const value = engagement.estimated_value
+    ? ` — $${Number(engagement.estimated_value).toLocaleString()}`
+    : '';
   return {
-    text: `${emoji} *${company?.name || 'Unknown'}* moved to *${newStage.replace('_', ' ')}*${value} by ${user?.name || 'Unknown'}`,
+    text: `${emoji} *${client?.name || 'Unknown'}* moved to *${newStatus}*${value} by ${user?.name || 'Unknown'}`,
   };
 }
 
-function buildNewLeadNotification(deal, company, contact) {
+function buildNewEngagementNotification(engagement, client) {
+  const source = engagement.source
+    ? ` (${engagement.source}${engagement.source_detail ? ` — ${engagement.source_detail}` : ''})`
+    : '';
   return {
-    text: `🆕 New lead: *${company?.name || 'Unknown'}*${deal.source ? ` (${deal.source}${deal.source_detail ? ` — ${deal.source_detail}` : ''})` : ''}`,
+    text: `🆕 New engagement: *${client?.name || 'Unknown'}*${source}`,
   };
 }
 
-function buildOverdueDigest(tasks) {
-  if (tasks.length === 0) return null;
-  const list = tasks.slice(0, 10).map(t => `• ${t.description} — ${t.company_name || 'No company'}`).join('\n');
-  return {
-    text: `⚠️ You have ${tasks.length} overdue task${tasks.length > 1 ? 's' : ''}:\n${list}`,
-  };
-}
-
-module.exports = { getSlackClient, postNotification, buildStageChangeNotification, buildNewLeadNotification, buildOverdueDigest };
+module.exports = {
+  getSlackClient,
+  postNotification,
+  buildStatusChangeNotification,
+  buildNewEngagementNotification,
+};

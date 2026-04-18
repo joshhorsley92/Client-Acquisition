@@ -1,16 +1,16 @@
 /**
- * Fit Score engine — computes a 0-100 qualification score for a deal
+ * Fit Score engine — computes a 0-100 qualification score for a CLIENT
  * based on ICP match, readiness signals, and engagement.
  *
- * Config source of truth: server/config/icp.json (read fresh on each call —
- * Joe edits live, no caching).
+ * v2: scoreDeal → scoreClient. The score applies to the business relationship,
+ * not a specific engagement. Config source of truth: server/config/icp.json
+ * (read fresh on each call — Joe edits live, no caching).
  */
 
 const path = require('path');
 
 const ICP_CONFIG_PATH = path.join(__dirname, '..', 'config', 'icp.json');
 
-// US states + DC (49 + DC — we treat MI specially, so "other US" = remaining 49 + DC).
 const US_STATES = new Set([
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
   'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
@@ -33,7 +33,6 @@ const US_STATE_NAMES = new Set([
 ]);
 
 function loadIcp() {
-  // Force fresh read — Joe edits live and expects effect immediately.
   delete require.cache[require.resolve(ICP_CONFIG_PATH)];
   return require(ICP_CONFIG_PATH);
 }
@@ -51,24 +50,16 @@ function containsAny(haystack, needles) {
   return false;
 }
 
-/**
- * Attempt to extract a USD revenue figure from free text.
- * Handles: "$5M", "5 million", "$500,000", "$1.2m", "2.5MM".
- * Returns a number (USD) or null.
- */
 function parseRevenueFromText(text) {
   if (!text) return null;
   const s = String(text).toLowerCase();
 
-  // $XM / $X.Ym / $X MM — million notation
   const mMatch = s.match(/\$?\s*(\d+(?:\.\d+)?)\s*(?:mm|m\b|million)/);
   if (mMatch) return parseFloat(mMatch[1]) * 1_000_000;
 
-  // $X billion — clamp to a big number
   const bMatch = s.match(/\$?\s*(\d+(?:\.\d+)?)\s*(?:b\b|billion)/);
   if (bMatch) return parseFloat(bMatch[1]) * 1_000_000_000;
 
-  // $X K / X,000 / plain "$500,000"
   const kMatch = s.match(/\$?\s*(\d+(?:\.\d+)?)\s*(?:k\b|thousand)/);
   if (kMatch) return parseFloat(kMatch[1]) * 1_000;
 
@@ -81,34 +72,27 @@ function parseRevenueFromText(text) {
   return null;
 }
 
-function resolveRevenueUsd(company) {
-  if (!company) return null;
-  // Prefer explicit numeric field if it exists
-  if (company.annual_revenue_usd != null && !isNaN(Number(company.annual_revenue_usd))) {
-    const n = Number(company.annual_revenue_usd);
+function resolveRevenueUsd(client) {
+  if (!client) return null;
+  if (client.annual_revenue_usd != null && !isNaN(Number(client.annual_revenue_usd))) {
+    const n = Number(client.annual_revenue_usd);
     if (n > 0) return n;
   }
-  // revenue_estimate is TEXT in our schema — parse it
-  if (company.revenue_estimate) {
-    const parsed = parseRevenueFromText(company.revenue_estimate);
+  if (client.revenue_estimate) {
+    const parsed = parseRevenueFromText(client.revenue_estimate);
     if (parsed != null) return parsed;
   }
-  // Description / notes fallback
-  if (company.description) {
-    const parsed = parseRevenueFromText(company.description);
-    if (parsed != null) return parsed;
-  }
-  if (company.notes) {
-    const parsed = parseRevenueFromText(company.notes);
+  if (client.notes) {
+    const parsed = parseRevenueFromText(client.notes);
     if (parsed != null) return parsed;
   }
   return null;
 }
 
-function scoreIndustryMatch(company, icp, maxPoints, flags) {
-  const haystack = [company && company.industry, company && company.description, company && company.notes]
+function scoreIndustryMatch(client, icp, maxPoints, flags) {
+  const haystack = [client && client.industry, client && client.notes]
     .filter(Boolean).join(' ');
-  if (!haystack) return Math.round(maxPoints * 7 / 15); // ~7 default "unknown"
+  if (!haystack) return Math.round(maxPoints * 7 / 15);
 
   const excluded = (icp.target_industries && icp.target_industries.excluded) || [];
   for (const kw of excluded) {
@@ -125,21 +109,16 @@ function scoreIndustryMatch(company, icp, maxPoints, flags) {
     }
   }
 
-  // Neither matched — treat as partial/unknown
   return Math.round(maxPoints * 7 / 15);
 }
 
-function scoreRevenueInRange(company, icp, maxPoints) {
+function scoreRevenueInRange(client, icp, maxPoints) {
   const range = icp.revenue_range || {};
   const min = Number(range.min_usd) || 0;
   const max = Number(range.max_usd) || Infinity;
 
-  const revenue = resolveRevenueUsd(company);
-  if (revenue == null) {
-    // No data — neutral half-credit (spec: default 5 when maxPoints is 10)
-    return Math.round(maxPoints / 2);
-  }
-
+  const revenue = resolveRevenueUsd(client);
+  if (revenue == null) return Math.round(maxPoints / 2);
   if (revenue >= min && revenue <= max) return maxPoints;
 
   const lowerBand = min * 0.75;
@@ -150,21 +129,17 @@ function scoreRevenueInRange(company, icp, maxPoints) {
   return 0;
 }
 
-function scoreGeographicFit(company, icp, maxPoints) {
+function scoreGeographicFit(client, icp, maxPoints) {
   const geo = icp.geographic_preference || {};
-  const locSource = [company && company.location, company && company.state]
-    .filter(Boolean).join(' ');
+  const locSource = client && client.location ? String(client.location) : '';
   if (!locSource) return 0;
 
   const lcLoc = lc(locSource);
 
-  // Michigan detection: "Michigan" or standalone "MI" token
   if (lcLoc.indexOf('michigan') !== -1) return maxPoints;
   if (/\b(mi)\b/i.test(locSource)) return maxPoints;
 
-  // Other US state?
   let matchedUsState = false;
-  // name match
   for (const name of US_STATE_NAMES) {
     if (lcLoc.indexOf(name) !== -1) {
       matchedUsState = true;
@@ -172,8 +147,7 @@ function scoreGeographicFit(company, icp, maxPoints) {
     }
   }
   if (!matchedUsState) {
-    // abbreviation match — tokenize by whitespace / comma / period
-    const tokens = String(locSource).split(/[\s,\.]+/).map(t => t.trim().toUpperCase());
+    const tokens = locSource.split(/[\s,\.]+/).map((t) => t.trim().toUpperCase());
     for (const t of tokens) {
       if (t.length === 2 && US_STATES.has(t)) { matchedUsState = true; break; }
     }
@@ -185,51 +159,40 @@ function scoreGeographicFit(company, icp, maxPoints) {
   return 0;
 }
 
-/**
- * Marketing signals lookup:
- * We have a Python-side `acq_marketing_signals` table bridged via `acq_leads`,
- * joined to Node `companies` by name. If the tables don't exist in this DB,
- * or no match is found, return null (caller applies neutral default).
- */
-function lookupMarketingSignals(db, company) {
-  if (!company || !company.name) return null;
+function lookupMarketingSignals(db, client) {
+  if (!client || !client.name) return null;
   try {
-    // Detect presence of the acq_* tables in this DB
     const tbls = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('acq_marketing_signals', 'acq_leads')"
     ).all();
-    const names = new Set(tbls.map(t => t.name));
+    const names = new Set(tbls.map((t) => t.name));
     if (!names.has('acq_marketing_signals')) return null;
 
     if (names.has('acq_leads')) {
-      // Join through acq_leads.company_name (or similar) if column exists
       try {
         const row = db.prepare(`
           SELECT ms.* FROM acq_marketing_signals ms
           JOIN acq_leads al ON ms.lead_id = al.id
           WHERE LOWER(al.company_name) = LOWER(?)
           ORDER BY ms.id DESC LIMIT 1
-        `).get(company.name);
+        `).get(client.name);
         if (row) return row;
-      } catch (e) { /* schema mismatch — fall through */ }
+      } catch (e) {}
     }
 
-    // Fallback: try company_name directly on signals table
     try {
       const row = db.prepare(`
         SELECT * FROM acq_marketing_signals
         WHERE LOWER(company_name) = LOWER(?)
         ORDER BY id DESC LIMIT 1
-      `).get(company.name);
+      `).get(client.name);
       if (row) return row;
-    } catch (e) { /* no such column — ignore */ }
-  } catch (e) {
-    // Any unexpected error — treat as no signals
-  }
+    } catch (e) {}
+  } catch (e) {}
   return null;
 }
 
-function scoreGreenFlags(icp, company, signals, dealTextBlob, cap, flags) {
+function scoreGreenFlags(icp, client, signals, textBlob, cap, flags) {
   let total = 0;
   const greenFlags = icp.green_flags || [];
 
@@ -239,20 +202,14 @@ function scoreGreenFlags(icp, company, signals, dealTextBlob, cap, flags) {
     let matched = false;
 
     if (id === 'product_with_weak_marketing') {
-      const hasIndustry = company && company.industry;
+      const hasIndustry = client && client.industry;
       const quality = signals && signals.website_quality;
-      if (hasIndustry && (quality == null || quality === 'basic')) {
-        matched = true;
-      }
+      if (hasIndustry && (quality == null || quality === 'basic')) matched = true;
     } else if (id === 'scaling_beyond_local') {
-      if (containsAny(dealTextBlob, ['scale', 'expand', 'grow'])) {
-        matched = true;
-      }
+      if (containsAny(textBlob, ['scale', 'expand', 'grow'])) matched = true;
     } else if (id === 'needs_basic_assets') {
       if (signals) {
-        if (Number(signals.has_website) === 0 || Number(signals.has_social_media) === 0) {
-          matched = true;
-        }
+        if (Number(signals.has_website) === 0 || Number(signals.has_social_media) === 0) matched = true;
       }
     }
 
@@ -265,8 +222,7 @@ function scoreGreenFlags(icp, company, signals, dealTextBlob, cap, flags) {
   return Math.min(cap, total);
 }
 
-function scoreRedFlags(icp, dealTextBlob, cap, flags) {
-  // cap is negative (e.g. -15) — sum matched weights and floor at cap
+function scoreRedFlags(icp, textBlob, cap, flags) {
   let total = 0;
   const redFlags = icp.red_flags || [];
 
@@ -276,10 +232,8 @@ function scoreRedFlags(icp, dealTextBlob, cap, flags) {
     let matched = false;
 
     if (id === 'unclear_everything_cheap') {
-      const cheapHit = containsAny(dealTextBlob, [
-        'cheapest', 'cheap', 'lowest price', 'can you do it for',
-      ]);
-      const everythingHit = containsAny(dealTextBlob, ['everything', 'whole', 'full']);
+      const cheapHit = containsAny(textBlob, ['cheapest', 'cheap', 'lowest price', 'can you do it for']);
+      const everythingHit = containsAny(textBlob, ['everything', 'whole', 'full']);
       if (cheapHit && everythingHit) matched = true;
     }
 
@@ -289,16 +243,15 @@ function scoreRedFlags(icp, dealTextBlob, cap, flags) {
     }
   }
 
-  // cap is negative; floor means "don't go more negative than cap"
   if (total < cap) total = cap;
-  if (total > 0) total = 0; // safety — red flags should never be positive
+  if (total > 0) total = 0;
   return total;
 }
 
 function scoreReadiness(signals, maxPoints) {
   if (!signals) {
     return {
-      score: Math.round(maxPoints / 2), // neutral default 15/30
+      score: Math.round(maxPoints / 2),
       details: { note: 'no marketing signals data' },
     };
   }
@@ -306,33 +259,18 @@ function scoreReadiness(signals, maxPoints) {
   const details = {};
   let raw = 0;
 
-  if (Number(signals.has_website) === 0) {
-    details.no_website = 10;
-    raw += 10;
-  }
-  if (Number(signals.has_social_media) === 0) {
-    details.no_social = 8;
-    raw += 8;
-  }
-  if (signals.website_quality === 'basic') {
-    details.weak_quality = 6;
-    raw += 6;
-  }
-  if (Number(signals.has_website) === 1 && Number(signals.has_seo) === 0) {
-    details.no_seo = 4;
-    raw += 4;
-  }
-  if (Number(signals.has_paid_ads) === 0) {
-    details.no_paid_ads = 2;
-    raw += 2;
-  }
+  if (Number(signals.has_website) === 0) { details.no_website = 10; raw += 10; }
+  if (Number(signals.has_social_media) === 0) { details.no_social = 8; raw += 8; }
+  if (signals.website_quality === 'basic') { details.weak_quality = 6; raw += 6; }
+  if (Number(signals.has_website) === 1 && Number(signals.has_seo) === 0) { details.no_seo = 4; raw += 4; }
+  if (Number(signals.has_paid_ads) === 0) { details.no_paid_ads = 2; raw += 2; }
 
   const capped = Math.min(maxPoints, raw);
   return { score: capped, details };
 }
 
-function scoreEngagement(db, dealId, maxPoints) {
-  const row = db.prepare('SELECT COUNT(*) AS n FROM activities WHERE deal_id = ?').get(dealId);
+function scoreEngagement(db, clientId, maxPoints) {
+  const row = db.prepare('SELECT COUNT(*) AS n FROM activities WHERE client_id = ?').get(clientId);
   const n = row ? Number(row.n) : 0;
 
   let score, bucket;
@@ -344,19 +282,9 @@ function scoreEngagement(db, dealId, maxPoints) {
   return { score, details: { activity_count: n, bucket } };
 }
 
-/**
- * Main entry point.
- * @param {import('better-sqlite3').Database} db
- * @param {number} dealId
- * @returns {{ score: number, breakdown: object, flags: { green: string[], red: string[] } }}
- */
-function scoreDeal(db, dealId) {
-  const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId);
-  if (!deal) throw new Error(`Deal ${dealId} not found`);
-
-  const company = deal.company_id
-    ? db.prepare('SELECT * FROM companies WHERE id = ?').get(deal.company_id)
-    : null;
+function scoreClient(db, clientId) {
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
+  if (!client) throw new Error(`Client ${clientId} not found`);
 
   const icp = loadIcp();
   const weights = icp.scoring_weights || { icp_match: 40, readiness_signals: 30, engagement: 30 };
@@ -370,50 +298,39 @@ function scoreDeal(db, dealId) {
 
   const flags = { green: [], red: [] };
 
-  // Blob of free-text for keyword-based signal detection
-  const dealTextBlob = [
-    deal.call_notes, deal.research_findings, deal.objections_noted,
-    deal.pricing_notes, deal.source_detail, deal.notes,
-    company && company.description, company && company.notes,
-  ].filter(Boolean).join(' \n ');
+  // Pull any engagement notes as signal for green/red flag keyword detection
+  const engagementNotes = db.prepare(
+    'SELECT notes, source_detail FROM engagements WHERE client_id = ?'
+  ).all(clientId);
+  const engagementBlob = engagementNotes
+    .map((e) => [e.notes, e.source_detail].filter(Boolean).join(' '))
+    .filter(Boolean).join(' \n ');
 
-  const industry_match = scoreIndustryMatch(company, icp, industryMax, flags);
-  const revenue_in_range = scoreRevenueInRange(company, icp, revenueMax);
-  const geographic_fit = scoreGeographicFit(company, icp, geoMax);
+  const textBlob = [client.notes, engagementBlob].filter(Boolean).join(' \n ');
 
-  const signals = lookupMarketingSignals(db, company);
+  const industry_match = scoreIndustryMatch(client, icp, industryMax, flags);
+  const revenue_in_range = scoreRevenueInRange(client, icp, revenueMax);
+  const geographic_fit = scoreGeographicFit(client, icp, geoMax);
 
-  const green_flag_bonus = scoreGreenFlags(icp, company, signals, dealTextBlob, greenCap, flags);
-  const red_flag_penalty = scoreRedFlags(icp, dealTextBlob, redCap, flags);
+  const signals = lookupMarketingSignals(db, client);
+
+  const green_flag_bonus = scoreGreenFlags(icp, client, signals, textBlob, greenCap, flags);
+  const red_flag_penalty = scoreRedFlags(icp, textBlob, redCap, flags);
 
   const icpRaw = industry_match + revenue_in_range + geographic_fit + green_flag_bonus + red_flag_penalty;
   const icpScore = Math.max(0, icpRaw);
 
   const readiness = scoreReadiness(signals, weights.readiness_signals || 30);
-  const engagement = scoreEngagement(db, dealId, weights.engagement || 30);
+  const engagement = scoreEngagement(db, clientId, weights.engagement || 30);
 
   const breakdown = {
     icp_match: {
       score: icpScore,
       max: weights.icp_match || 40,
-      details: {
-        industry_match,
-        revenue_in_range,
-        geographic_fit,
-        green_flag_bonus,
-        red_flag_penalty,
-      },
+      details: { industry_match, revenue_in_range, geographic_fit, green_flag_bonus, red_flag_penalty },
     },
-    readiness_signals: {
-      score: readiness.score,
-      max: weights.readiness_signals || 30,
-      details: readiness.details,
-    },
-    engagement: {
-      score: engagement.score,
-      max: weights.engagement || 30,
-      details: engagement.details,
-    },
+    readiness_signals: { score: readiness.score, max: weights.readiness_signals || 30, details: readiness.details },
+    engagement: { score: engagement.score, max: weights.engagement || 30, details: engagement.details },
   };
 
   let total = icpScore + readiness.score + engagement.score;
@@ -421,15 +338,13 @@ function scoreDeal(db, dealId) {
   if (total < 0) total = 0;
   if (total > 100) total = 100;
 
-  // Persist (compute-once-cache pattern)
   try {
-    db.prepare('UPDATE deals SET fit_score = ?, fit_score_breakdown = ?, updated_at = datetime(\'now\') WHERE id = ?')
-      .run(total, JSON.stringify({ breakdown, flags }), dealId);
-  } catch (e) {
-    // If schema is out of date in an unexpected env, don't block the score.
-  }
+    db.prepare(
+      "UPDATE clients SET fit_score = ?, fit_score_breakdown = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(total, JSON.stringify({ breakdown, flags }), clientId);
+  } catch (e) { /* best-effort */ }
 
   return { score: total, breakdown, flags };
 }
 
-module.exports = { scoreDeal, parseRevenueFromText, loadIcp };
+module.exports = { scoreClient, parseRevenueFromText, loadIcp };

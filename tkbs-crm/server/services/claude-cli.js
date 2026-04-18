@@ -67,20 +67,33 @@ function runCli(prompt, options = {}) {
 
 /**
  * Runs Claude CLI and tracks the job in the generation_jobs table.
- * Updates job status on completion or failure.
+ * v2: jobs are scoped to an engagement; activities are logged with both
+ * engagement_id and its client_id.
  *
  * @param {object} db - Database connection
- * @param {number} dealId - Deal ID to link the job to
+ * @param {number} engagementId - Engagement ID to link the job to
  * @param {string} type - Job type (analysis_deck, proposal, ai_content)
  * @param {string} prompt - The prompt to send
  * @param {object} options - Optional settings passed to runCli
  */
-async function runTrackedJob(db, dealId, type, prompt, options = {}) {
-  // Create the job record
+async function runTrackedJob(db, engagementId, type, prompt, options = {}) {
+  const engagement = db.prepare('SELECT client_id FROM engagements WHERE id = ?').get(engagementId);
+  const clientId = engagement ? engagement.client_id : null;
+
   const result = db.prepare(
-    `INSERT INTO generation_jobs (deal_id, type, status) VALUES (?, ?, 'running')`
-  ).run(dealId, type);
+    `INSERT INTO generation_jobs (engagement_id, type, status) VALUES (?, ?, 'running')`
+  ).run(engagementId, type);
   const jobId = result.lastInsertRowid;
+
+  const logActivity = (content) => {
+    if (!clientId) return;
+    try {
+      db.prepare(
+        `INSERT INTO activities (client_id, engagement_id, type, content, metadata)
+         VALUES (?, ?, 'system', ?, ?)`
+      ).run(clientId, engagementId, content, JSON.stringify({ job_id: jobId }));
+    } catch (e) { /* best-effort */ }
+  };
 
   try {
     const { output } = await runCli(prompt, options);
@@ -89,10 +102,7 @@ async function runTrackedJob(db, dealId, type, prompt, options = {}) {
       `UPDATE generation_jobs SET status = 'completed', output = ?, completed_at = datetime('now') WHERE id = ?`
     ).run(output, jobId);
 
-    // Log activity
-    db.prepare(
-      `INSERT INTO activities (deal_id, type, content, metadata) VALUES (?, 'system', ?, ?)`
-    ).run(dealId, `AI generation completed: ${type}`, JSON.stringify({ job_id: jobId }));
+    logActivity(`AI generation completed: ${type}`);
 
     return { jobId, output, status: 'completed' };
   } catch (err) {
@@ -100,10 +110,7 @@ async function runTrackedJob(db, dealId, type, prompt, options = {}) {
       `UPDATE generation_jobs SET status = 'failed', error = ?, completed_at = datetime('now') WHERE id = ?`
     ).run(err.message, jobId);
 
-    // Log error as activity
-    db.prepare(
-      `INSERT INTO activities (deal_id, type, content, metadata) VALUES (?, 'system', ?, ?)`
-    ).run(dealId, `AI generation failed: ${type} — ${err.message}`, JSON.stringify({ job_id: jobId }));
+    logActivity(`AI generation failed: ${type} — ${err.message}`);
 
     return { jobId, error: err.message, status: 'failed' };
   }

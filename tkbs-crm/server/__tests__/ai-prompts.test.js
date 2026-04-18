@@ -1,51 +1,61 @@
-const { buildPrompt } = require('../services/ai-prompts');
+const { buildPrompt, getPromptTypesForStatus } = require('../services/ai-prompts');
 
-const mockDeal = {
-  stage: 'outreach', source: 'cold', source_detail: '',
-  estimated_value: 2500, package_type: 'boost',
-  services_discussed: '["Landing Page","Email Marketing","Meta Ads"]',
-  call_notes: 'They rely on referrals only.', research_findings: 'No email infrastructure. Thin GBP listing.',
-  objections_noted: '',
+const mockEngagement = {
+  status: 'proposal',
+  source: 'cold',
+  source_detail: '',
+  estimated_value: 2500,
+  package_type: 'boost',
+  notes: 'They rely on referrals only. No email infrastructure.',
 };
-const mockContact = { name: 'Sarah Chen', email: 'sarah@acme.com', phone: '555-1234' };
-const mockCompany = { name: 'Acme Manufacturing', location: 'Detroit, MI', industry: 'Manufacturing', type: 'B2B', website: 'acme-mfg.com' };
+
+const mockClient = {
+  name: 'Acme Manufacturing',
+  primary_contact_name: 'Sarah Chen',
+  email: 'sarah@acme.com',
+  location: 'Detroit, MI',
+  industry: 'Manufacturing',
+  type: 'B2B',
+  website: 'acme-mfg.com',
+};
 
 describe('buildPrompt', () => {
-  test('builds outreach email prompt with Hormozi framework', () => {
-    const prompt = buildPrompt('outreach_emails', mockDeal, mockContact, mockCompany);
+  test('proposal_content includes Value Equation framing with client context', () => {
+    const prompt = buildPrompt('proposal_content', mockEngagement, mockClient);
     expect(prompt).toContain('Acme Manufacturing');
-    expect(prompt).toContain('Sarah Chen');
-    expect(prompt).toContain('Detroit, MI');
-    expect(prompt).toContain('Hormozi');
     expect(prompt).toContain('Value Equation');
-    expect(prompt).toContain('break-up');
+    expect(prompt).toContain('90 days');
   });
 
-  test('builds call script prompt with CLOSER framework', () => {
-    const prompt = buildPrompt('outreach_call', mockDeal, mockContact, mockCompany);
-    expect(prompt).toContain('CLOSER');
-    expect(prompt).toContain('CLARIFY');
-    expect(prompt).toContain('REINFORCE');
+  test('followup_emails includes break-up cadence', () => {
+    const prompt = buildPrompt('followup_emails', mockEngagement, mockClient);
+    expect(prompt).toContain('Break-up');
+    expect(prompt).toContain('Sarah Chen');
+    expect(prompt).toContain('Day 21');
   });
 
-  test('builds follow-up prompt with objection weaving', () => {
-    const dealWithObjections = { ...mockDeal, stage: 'follow_up', objections_noted: 'Price concern — thinks $2500 is high' };
-    const prompt = buildPrompt('followup_emails', dealWithObjections, mockContact, mockCompany);
-    expect(prompt).toContain('Price concern');
-    expect(prompt).toContain('ROI');
+  test('objection_scripts references industry for specificity', () => {
+    const prompt = buildPrompt('objection_scripts', mockEngagement, mockClient);
+    expect(prompt).toContain('Manufacturing');
+    expect(prompt).toContain('Value Equation');
   });
 
-  test('builds objection handling prompt', () => {
-    const prompt = buildPrompt('objection_scripts', mockDeal, mockContact, mockCompany);
-    expect(prompt).toContain('Too expensive');
-    expect(prompt).toContain('I need to think about it');
-    expect(prompt).toContain('NEVER discount');
+  test('default fallback includes Hormozi preamble', () => {
+    const prompt = buildPrompt('generic', mockEngagement, mockClient);
+    expect(prompt).toContain('Hormozi');
+  });
+});
+
+describe('getPromptTypesForStatus', () => {
+  test('working status gets follow-up + objection prompts', () => {
+    expect(getPromptTypesForStatus('working')).toEqual(['followup_emails', 'objection_scripts']);
   });
 
-  test('adapts tone for warm vs cold source', () => {
-    const warmDeal = { ...mockDeal, source: 'referral', source_detail: 'Referral from Dave' };
-    const prompt = buildPrompt('outreach_emails', warmDeal, mockContact, mockCompany);
-    expect(prompt).toContain('warm');
-    expect(prompt).toContain('Dave');
+  test('proposal status gets proposal + follow-up prompts', () => {
+    expect(getPromptTypesForStatus('proposal')).toEqual(['proposal_content', 'followup_emails']);
+  });
+
+  test('unknown status falls back to generic', () => {
+    expect(getPromptTypesForStatus('unknown_status')).toEqual(['generic']);
   });
 });

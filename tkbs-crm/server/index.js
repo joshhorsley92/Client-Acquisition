@@ -54,24 +54,19 @@ function createApp(testDb) {
 
   // Routes
   app.use('/api/auth', require('./routes/auth'));
-  app.use('/api/companies', require('./routes/companies'));
-  app.use('/api/contacts', require('./routes/contacts'));
-  app.use('/api/deals', require('./routes/deals'));
+  app.use('/api/clients', require('./routes/clients'));
+  app.use('/api/engagements', require('./routes/engagements'));
+  app.use('/api/enrichment', require('./routes/enrichment'));
   app.use('/api/activities', require('./routes/activities'));
-  app.use('/api/tasks', require('./routes/tasks'));
+  app.use('/api/calls', require('./routes/calls'));
   app.use('/api/scripts', require('./routes/scripts'));
   app.use('/api/settings', require('./routes/settings'));
   app.use('/api/reports', require('./routes/reports'));
   app.use('/api/integrations', require('./routes/integrations'));
-  app.use('/api/email', require('./routes/email'));
-  app.use('/api/slack', require('./routes/slack'));
-  app.use('/api/calendar', require('./routes/calendar'));
-  app.use('/api/webhooks', require('./routes/webhooks'));
-  app.use('/api/sms', require('./routes/sms'));
-  app.use('/api/intake', require('./routes/intake'));
-  app.use('/api/import', require('./routes/import'));
-  app.use('/api/calls', require('./routes/calls'));
-  app.use('/api/search', require('./routes/search'));
+
+  // Unmounted until migrated to v2 (files preserved on disk):
+  //   email, slack (route), calendar, webhooks, sms, intake, import, search
+  // Re-mount here as each is repointed off deals/companies/contacts/tasks.
 
   // Serve client build in production
   if (process.env.NODE_ENV === 'production') {
@@ -101,22 +96,8 @@ if (require.main === module) {
     console.log(`TKBS CRM server running on http://localhost:${PORT}`);
   });
 
-  // Start Gmail sync polling (every 5 minutes)
-  setInterval(async () => {
-    try {
-      const { syncInboundEmails } = require('./services/email-sync');
-      const { getDb } = require('./db');
-      const db = getDb();
-      const result = await syncInboundEmails(db);
-      if (result.synced > 0) {
-        console.log(`Gmail sync: ${result.synced} new emails imported, ${result.skipped} skipped`);
-      }
-    } catch (err) {
-      // Silent fail — sync is best effort
-    }
-  }, 5 * 60 * 1000); // 5 minutes
-
-  console.log('Gmail auto-sync enabled (every 5 minutes)');
+  // Gmail auto-sync is disabled until services/email-sync.js is repointed off
+  // the deleted deals/contacts tables. Re-enable here after that migration.
 }
 
 module.exports = { createApp };
