@@ -4,34 +4,16 @@ import { api } from '../lib/api';
 import { useAuth } from '../App';
 import Modal from '../components/Modal';
 
+// v2: Gmail, Google Calendar, and Twilio UIs are gone — their backend routes
+// are unmounted until they're repointed off the deleted deals/contacts tables.
+// Slack + Outbound Webhooks stay because status-actions.js still uses them.
 const INTEGRATION_META = {
-  gmail: {
-    label: 'Gmail',
-    description: 'Send and receive emails from deal views. Auto-log as activity with open/click tracking.',
-    fields: null, // OAuth flow (placeholder)
-    oauthPlaceholder: true,
-  },
   slack: {
     label: 'Slack',
-    description: 'Post notifications to Slack on stage changes, closed deals, and overdue tasks.',
+    description: 'Post notifications to Slack on engagement status changes (new / working / won / lost).',
     fields: [
       { key: 'webhookUrl', label: 'Webhook URL', type: 'text', placeholder: 'https://hooks.slack.com/services/...' },
       { key: 'botToken', label: 'Bot Token', type: 'password', placeholder: 'xoxb-...' },
-    ],
-  },
-  google_calendar: {
-    label: 'Google Calendar',
-    description: 'Auto-create calendar events for discovery calls. Shares Gmail OAuth.',
-    fields: null,
-    oauthPlaceholder: true,
-  },
-  twilio: {
-    label: 'Twilio SMS',
-    description: 'Send and receive SMS messages from deal views. Auto-log as activity.',
-    fields: [
-      { key: 'accountSid', label: 'Account SID', type: 'text', placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' },
-      { key: 'authToken', label: 'Auth Token', type: 'password', placeholder: 'Your auth token' },
-      { key: 'phoneNumber', label: 'Phone Number', type: 'text', placeholder: '+15551234567' },
     ],
   },
   webhooks: {
