@@ -2,12 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
+import {
+  markdownToHtml,
+  downloadMarkdownAsDocx,
+  downloadAsMarkdown,
+  copyToClipboard,
+} from '../lib/markdown';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
   { key: 'engagements', label: 'Engagements' },
   { key: 'calls', label: 'Calls' },
-  { key: 'scripts', label: 'Scripts' },
+  { key: 'automations', label: 'Automations' },
   { key: 'activity', label: 'Activity' },
 ];
 
@@ -110,7 +116,7 @@ export default function ClientDetail() {
         <EngagementsTab clientId={client.id} engagements={engagements} onChange={load} />
       )}
       {tab === 'calls' && <CallsTab clientId={client.id} clientName={client.name} />}
-      {tab === 'scripts' && <ScriptsTab client={client} />}
+      {tab === 'automations' && <AutomationsTab client={client} engagements={engagements} />}
       {tab === 'activity' && <ActivityTab clientId={client.id} />}
     </div>
   );
@@ -620,12 +626,12 @@ function CallsTab({ clientId, clientName }) {
 }
 
 // ---------------------------------------------------------------------------
-// Scripts tab
+// Automations tab — runnable AI workflows (proposal, etc.) + template preview
 // ---------------------------------------------------------------------------
 
 const SCRIPT_STAGES = ['working', 'proposal', 'closed_won'];
 
-function ScriptsTab({ client }) {
+function AutomationsTab({ client, engagements }) {
   const [stage, setStage] = useState('working');
   const [scripts, setScripts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -652,11 +658,16 @@ function ScriptsTab({ client }) {
     role: client.role || '',
     notes: client.notes || '',
   };
-
   const fill = (content) => content.replace(/\{(\w+)\}/g, (m, f) => ctx[f] || m);
 
   return (
     <div>
+      <GenerateProposalPanel client={client} engagements={engagements} />
+
+      <div style={{ fontSize: 12, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em', margin: '18px 0 8px' }}>
+        Template library
+      </div>
+
       <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
         {SCRIPT_STAGES.map((s) => (
           <button key={s} onClick={() => setStage(s)} style={{
@@ -685,6 +696,207 @@ function ScriptsTab({ client }) {
             </div>
           ))
       )}
+    </div>
+  );
+}
+
+function GenerateProposalPanel({ client, engagements }) {
+  const eligible = engagements.filter((e) => e.status === 'new' || e.status === 'working' || e.status === 'won');
+  const [selected, setSelected] = useState(() => (eligible[0]?.id?.toString() || ''));
+  const [job, setJob] = useState(null);          // { id, status, output, error, brand_profile_source }
+  const [kicking, setKicking] = useState(false);
+  const [viewer, setViewer] = useState(null);    // { markdown, brand_profile_source }
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!eligible.length) setSelected('');
+    else if (!eligible.find((e) => e.id?.toString() === selected)) {
+      setSelected(eligible[0].id.toString());
+    }
+    // eslint-disable-next-line
+  }, [engagements]);
+
+  // Poll while the job is running.
+  useEffect(() => {
+    if (!job || job.status !== 'running') return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await api.getAutomationJob(job.id);
+        if (res.job.status === 'completed') {
+          clearInterval(timer);
+          setJob({ ...job, ...res.job });
+          setViewer({ markdown: res.job.output, brand_profile_source: job.brand_profile_source });
+        } else if (res.job.status === 'failed') {
+          clearInterval(timer);
+          setJob({ ...job, ...res.job });
+          setError(res.job.error || 'Generation failed');
+        }
+      } catch (e) { /* will retry next tick */ }
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [job?.id, job?.status]);
+
+  const run = async () => {
+    if (!selected) return;
+    setKicking(true); setError('');
+    try {
+      const res = await api.runAutomation({
+        automation: 'proposal',
+        client_id: client.id,
+        engagement_id: Number(selected),
+      });
+      setJob({ id: res.job_id, status: 'running', brand_profile_source: res.brand_profile_source });
+    } catch (e) {
+      setError(e.message || 'Failed to start generation');
+    } finally {
+      setKicking(false);
+    }
+  };
+
+  const isRunning = job?.status === 'running';
+
+  return (
+    <>
+      <div style={{ ...panelStyle, marginBottom: 12, borderLeft: '3px solid #00D4AA' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Generate Proposal</span>
+              <span style={{ fontSize: 10, background: '#E6FAF5', color: '#047857', border: '1px solid #6EE7B7', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>AI</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+              Uses the latest Brand Profile extraction + the selected engagement to draft a full
+              proposal grounded in the discovery call.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginTop: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+              Engagement
+            </label>
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              disabled={!eligible.length || isRunning}
+              style={inputStyle}
+            >
+              {eligible.length === 0 && <option value="">No eligible engagement — add one first</option>}
+              {eligible.map((e) => (
+                <option key={e.id} value={e.id}>
+                  #{e.id} · {e.status} · ${Number(e.estimated_value || 0).toLocaleString()}{e.package_type ? ` · ${e.package_type}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={run}
+            disabled={!selected || kicking || isRunning}
+            style={{
+              ...primaryBtnStyle,
+              padding: '9px 18px',
+              opacity: (!selected || kicking || isRunning) ? 0.5 : 1,
+              cursor: (!selected || kicking || isRunning) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isRunning ? 'Generating…' : kicking ? 'Starting…' : 'Generate'}
+          </button>
+        </div>
+
+        {isRunning && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#64748B' }}>
+            Claude is working — typically 30–60s. You can navigate away; the job will finish in the background and log to activity.
+          </div>
+        )}
+        {error && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', padding: '6px 10px', borderRadius: 4 }}>
+            {error}
+          </div>
+        )}
+        {job?.brand_profile_source && (
+          <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8' }}>
+            Using brand profile from call #{job.brand_profile_source.call_recording_id}
+            {job.brand_profile_source.review_status && ` (${job.brand_profile_source.review_status})`}
+          </div>
+        )}
+        {!eligible.length && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>
+            Add an engagement above to enable this automation.
+          </div>
+        )}
+      </div>
+
+      {viewer && (
+        <OutputViewer
+          title="Proposal draft"
+          markdown={viewer.markdown}
+          client={client}
+          brandSource={viewer.brand_profile_source}
+          onClose={() => setViewer(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function OutputViewer({ title, markdown, client, brandSource, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const htmlBody = useMemo(() => markdownToHtml(markdown || ''), [markdown]);
+  const baseName = `${(client?.name || 'proposal').replace(/[^a-z0-9]+/gi, '_')}_proposal_${new Date().toISOString().slice(0, 10)}`;
+
+  const copy = async () => {
+    try {
+      await copyToClipboard(markdown);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) { /* ignore */ }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200,
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 10, width: 'min(920px, 100%)',
+          maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.3)', overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #E2E6EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
+            {brandSource && (
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                Grounded in brand profile from call #{brandSource.call_recording_id}
+                {brandSource.completion_percent != null && ` · ${brandSource.completion_percent}% complete`}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#64748B' }}>×</button>
+        </div>
+
+        <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1, lineHeight: 1.6, color: '#1B2838' }}
+             dangerouslySetInnerHTML={{ __html: htmlBody }} />
+
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #E2E6EB', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={copy} style={secondaryBtnStyle}>
+            {copied ? '✓ Copied' : 'Copy markdown'}
+          </button>
+          <button onClick={() => downloadAsMarkdown(markdown, baseName)} style={secondaryBtnStyle}>
+            Download .md
+          </button>
+          <button onClick={() => downloadMarkdownAsDocx(markdown, baseName)} style={primaryBtnStyle}>
+            Download .docx
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

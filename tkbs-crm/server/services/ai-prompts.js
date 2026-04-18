@@ -20,9 +20,10 @@ KEY RULES:
 
 `;
 
-function buildPrompt(type, engagement, client) {
+function buildPrompt(type, engagement, client, brandProfile) {
   const e = engagement || {};
   const c = client || {};
+  const bp = brandProfile && brandProfile.profile ? brandProfile.profile : (brandProfile || null);
 
   const context = `
 PROSPECT CONTEXT:
@@ -38,22 +39,54 @@ PROSPECT CONTEXT:
 - Estimated value: $${e.estimated_value || 0}
 - Engagement notes: ${e.notes || 'none'}
 - Client notes: ${c.notes || 'none'}
-`;
+${bp ? buildBrandProfileSection(bp) : ''}`;
 
   switch (type) {
     case 'proposal_content':
       return HORMOZI_PREAMBLE + context + `
-Generate a proposal for ${c.name}.
+Generate a complete proposal document for ${c.name} in well-formatted Markdown.
+Apply the Value Equation throughout — every section should speak to at least
+one of Dream Outcome, Perceived Likelihood, Time Delay, or Effort & Sacrifice.
 
-Structure it around the Value Equation:
-1. Where they are today — mirror back their own words on the current state.
-2. Where they'll be in 90 days — their dream outcome, made tangible.
-3. What we'll deliver, in plain language, each tied to the gap it closes.
-4. First 30-day milestones.
-5. Investment — price, terms, what's included, what's not.
-6. Risk reversal — what we commit to.
+${bp ? `GROUND THE PROPOSAL IN THE BRAND PROFILE ABOVE. Use the customer avatar,
+brand voice, and pain-point language their discovery call surfaced. Mirror
+their words, not ours.` : `No brand profile yet — lean harder on the engagement
+notes and the client profile above.`}
 
-Tone: specific, confident, consultative. Avoid generic marketing language.`;
+Structure (use Markdown headings):
+
+# Proposal for ${c.name}
+Short opening paragraph that names the dream outcome in their own words.
+
+## Where you are today
+Mirror back the current-state picture from the brand profile / notes — problems,
+constraints, what isn't working. Be specific.
+
+## Where you'll be in 90 days
+The dream outcome, made tangible and time-bound. What will be measurably
+different? Reference the customer avatar's "moment of need" if the brand
+profile surfaced one.
+
+## What we'll deliver
+Bullet list. Each deliverable in one plain-language line, tied to the gap it
+closes. Group by phase if helpful.
+
+## First 30-day milestones
+Concrete, week-by-week if possible.
+
+## Investment
+- Package: ${e.package_type || 'to be decided'}
+- Estimated value: $${e.estimated_value || 0}
+- What's included / what's not.
+
+## Risk reversal
+Exactly what we commit to. Specific, not vague.
+
+## Next step
+A single, clear call to action (sign, kickoff date, etc.).
+
+Tone: specific, confident, consultative. Avoid generic marketing language.
+Output Markdown only — no commentary before or after.`;
 
     case 'followup_emails':
       return HORMOZI_PREAMBLE + context + `
@@ -84,6 +117,22 @@ Make all scripts specific to ${c.name}'s industry, size, and known context.`;
 Generate sales content for the "${e.status || 'working'}" stage of an engagement with ${c.name}.
 Apply the Value Equation. Be specific to their business.`;
   }
+}
+
+function buildBrandProfileSection(profile) {
+  const safe = (v) => (v == null || v === '' ? null : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const rows = [
+    ['Business description', safe(profile.business_description)],
+    ['Customer avatar', safe(profile.customer_avatar)],
+    ['Brand personality', safe(profile.brand_personality)],
+    ['Brand voice', safe(profile.brand_voice)],
+    ['Visual identity', safe(profile.visual_identity)],
+    ['Revenue streams', safe(profile.revenue_streams)],
+    ['Years in business', safe(profile.years_in_business)],
+    ['Location', [safe(profile.location_city), safe(profile.location_state)].filter(Boolean).join(', ') || null],
+  ].filter(([, v]) => v);
+  if (rows.length === 0) return '';
+  return '\nBRAND PROFILE (from the discovery call):\n' + rows.map(([k, v]) => `- ${k}: ${v}`).join('\n') + '\n';
 }
 
 /**

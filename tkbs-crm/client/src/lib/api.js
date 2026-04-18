@@ -60,11 +60,16 @@ export const api = {
   getActivities: (params) => request(`/activities${qs(params)}`),
   createActivity: (body) => request('/activities', { method: 'POST', body }),
 
-  // Scripts (schema unchanged, templates pruned to working/proposal/closed_won)
+  // Automation templates (backend table still named script_templates).
   getScripts: (params) => request(`/scripts${qs(params)}`),
   createScript: (body) => request('/scripts', { method: 'POST', body }),
   updateScript: (id, body) => request(`/scripts/${id}`, { method: 'PATCH', body }),
   deleteScript: (id) => request(`/scripts/${id}`, { method: 'DELETE' }),
+
+  // Automations — runnable AI generation workflows (proposal, etc.)
+  getAutomationCatalog: () => request('/automations/catalog'),
+  runAutomation: (body) => request('/automations/run', { method: 'POST', body }),
+  getAutomationJob: (id) => request(`/automations/job/${id}`),
 
   // Reports (v2 — drops /funnel /velocity /time-investment; adds /status /client-revenue)
   getReportSummary: () => request('/reports/summary'),

@@ -51,7 +51,7 @@ export default function Scripts() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Script Templates</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Automations</h1>
         <button
           onClick={() => { setEditing(null); setForm({ stage: activeStage, name: '', type: 'email', content: '' }); setShowForm(true); }}
           style={{
@@ -68,7 +68,8 @@ export default function Scripts() {
         background: '#F7F8FA', borderRadius: 6, border: '1px solid #E2E6EB',
         fontSize: 12, color: '#64748B',
       }}>
-        In-context merge-field preview against a real client comes back in Phase 3B under ClientDetail → Scripts.
+        Templates here feed the run-automations experience on each client. To actually run an
+        automation (e.g. generate a proposal), open the client and use its Automations tab.
       </div>
 
       {/* Stage tabs */}

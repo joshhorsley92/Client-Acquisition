@@ -6,7 +6,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Clients from './pages/Clients';
 import ClientDetail from './pages/ClientDetail';
-import Scripts from './pages/Scripts';
+import Automations from './pages/Automations';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Calls from './pages/Calls';
@@ -74,7 +74,8 @@ export default function App() {
             <Route path="clients/:id" element={<ClientDetail />} />
             <Route path="calls" element={<Calls />} />
             <Route path="calls/:id" element={<CallDetail />} />
-            <Route path="scripts" element={<Scripts />} />
+            <Route path="automations" element={<Automations />} />
+            <Route path="scripts" element={<Navigate to="/automations" replace />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
             {/* Legacy v1 URLs — bounce to the new equivalents. */}
