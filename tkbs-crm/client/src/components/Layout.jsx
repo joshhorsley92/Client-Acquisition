@@ -7,7 +7,7 @@ const navItems = [
   { to: '/', label: 'Home', icon: '◉' },
   { to: '/clients', label: 'Clients', icon: '⌂' },
   { to: '/calls', label: 'Calls', icon: '☎' },
-  { to: '/automations', label: 'Automations', icon: '⚡' },
+  { to: '/automations', label: 'Automations', icon: '»' },
   { to: '/reports', label: 'Reports', icon: '▦' },
   { to: '/settings', label: 'Settings', icon: '⚙' },
 ];
@@ -58,7 +58,6 @@ export default function Layout() {
             textAlign: 'left',
           }}
         >
-          <span style={{ fontSize: 14 }}>🔍</span>
           <span style={{ flex: 1 }}>Search...</span>
           <span style={{ fontSize: 11, color: '#64748B', background: '#1B2838', padding: '1px 6px', borderRadius: 3 }}>Ctrl+K</span>
         </button>
