@@ -5,11 +5,7 @@ import GlobalSearch from './GlobalSearch';
 
 const navItems = [
   { to: '/', label: 'Home', icon: '◉' },
-  { to: '/pipeline', label: 'Pipeline', icon: '◫' },
-  { to: '/import', label: 'Import', icon: '⬆' },
-  { to: '/tasks', label: 'Tasks', icon: '☑' },
-  { to: '/contacts', label: 'Contacts', icon: '☻' },
-  { to: '/companies', label: 'Companies', icon: '⌂' },
+  { to: '/clients', label: 'Clients', icon: '⌂' },
   { to: '/calls', label: 'Calls', icon: '☎' },
   { to: '/scripts', label: 'Scripts', icon: '✎' },
   { to: '/reports', label: 'Reports', icon: '▦' },

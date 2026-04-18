@@ -4,15 +4,11 @@ import { api } from './lib/api';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Home from './pages/Home';
-import Pipeline from './pages/Pipeline';
-import DealDetail from './pages/DealDetail';
-import Contacts from './pages/Contacts';
-import Companies from './pages/Companies';
-import Tasks from './pages/Tasks';
+import Clients from './pages/Clients';
+import ClientDetail from './pages/ClientDetail';
 import Scripts from './pages/Scripts';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
-import Import from './pages/Import';
 import Calls from './pages/Calls';
 import CallDetail from './pages/CallDetail';
 
@@ -74,17 +70,21 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Home />} />
-            <Route path="pipeline" element={<Pipeline />} />
-            <Route path="deals/:id" element={<DealDetail />} />
-            <Route path="contacts" element={<Contacts />} />
-            <Route path="companies" element={<Companies />} />
-            <Route path="tasks" element={<Tasks />} />
+            <Route path="clients" element={<Clients />} />
+            <Route path="clients/:id" element={<ClientDetail />} />
+            <Route path="calls" element={<Calls />} />
+            <Route path="calls/:id" element={<CallDetail />} />
             <Route path="scripts" element={<Scripts />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="import" element={<Import />} />
-            <Route path="calls" element={<Calls />} />
-            <Route path="calls/:id" element={<CallDetail />} />
+            {/* Legacy v1 URLs — bounce to the new equivalents. */}
+            <Route path="pipeline" element={<Navigate to="/clients" replace />} />
+            <Route path="companies" element={<Navigate to="/clients" replace />} />
+            <Route path="contacts" element={<Navigate to="/clients" replace />} />
+            <Route path="tasks" element={<Navigate to="/" replace />} />
+            <Route path="import" element={<Navigate to="/clients" replace />} />
+            <Route path="deals/:id" element={<Navigate to="/clients" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>

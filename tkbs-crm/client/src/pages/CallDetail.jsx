@@ -284,16 +284,16 @@ export default function CallDetail() {
       }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
-            Call — {call.company_name || `Deal #${call.deal_id}`}
+            Call — {call.client_name || `Client #${call.client_id}`}
           </h1>
           <div style={{ fontSize: 13, color: '#64748B', marginTop: 6 }}>
             {formatDate(call.call_date || call.created_at)}
             {call.duration_minutes ? ` · ${call.duration_minutes} min` : ''}
           </div>
         </div>
-        {call.deal_id && (
+        {call.client_id && (
           <Link
-            to={`/deals/${call.deal_id}`}
+            to={`/clients/${call.client_id}`}
             style={{
               padding: '8px 14px', background: '#fff', color: '#1B2838',
               border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13,

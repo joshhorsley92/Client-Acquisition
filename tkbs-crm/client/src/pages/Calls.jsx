@@ -50,14 +50,14 @@ function formatFileSize(bytes) {
 
 export default function Calls() {
   const [calls, setCalls] = useState([]);
-  const [deals, setDeals] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
 
   // Upload form state
-  const [dealId, setDealId] = useState('');
+  const [clientId, setClientId] = useState('');
   const [callDate, setCallDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [durationMinutes, setDurationMinutes] = useState('');
   const [audioFile, setAudioFile] = useState(null);
@@ -68,9 +68,9 @@ export default function Calls() {
   const load = async () => {
     setLoading(true);
     try {
-      const [callsData, dealsData] = await Promise.all([api.getCalls(), api.getDeals()]);
+      const [callsData, clientsData] = await Promise.all([api.getCalls(), api.getClients()]);
       setCalls(callsData.calls || []);
-      setDeals(dealsData.deals || []);
+      setClients(clientsData.clients || []);
     } catch (err) {
       setError(err.message || 'Failed to load calls');
     } finally {
@@ -81,7 +81,7 @@ export default function Calls() {
   useEffect(() => { load(); }, []);
 
   const resetForm = () => {
-    setDealId(''); setCallDate(new Date().toISOString().slice(0, 10));
+    setClientId(''); setCallDate(new Date().toISOString().slice(0, 10));
     setDurationMinutes(''); setAudioFile(null); setTranscript(''); setNotes('');
     setError(''); if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -90,13 +90,13 @@ export default function Calls() {
     e.preventDefault();
     setError('');
 
-    if (!dealId) { setError('Select a deal'); return; }
+    if (!clientId) { setError('Select a client'); return; }
     if (!audioFile && !transcript.trim()) { setError('Provide an audio file or paste a transcript'); return; }
 
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append('deal_id', dealId);
+      formData.append('client_id', clientId);
       if (callDate) formData.append('call_date', callDate);
       if (durationMinutes) formData.append('duration_minutes', durationMinutes);
       if (audioFile) formData.append('audio', audioFile);
@@ -122,11 +122,6 @@ export default function Calls() {
     } catch (err) {
       alert(err.message || 'Delete failed');
     }
-  };
-
-  const dealLabel = (deal) => {
-    const co = deal.company_name ? ` — ${deal.company_name}` : '';
-    return `#${deal.id}${co} · ${deal.stage}`;
   };
 
   return (
@@ -169,18 +164,18 @@ export default function Calls() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div>
               <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>
-                Deal <span style={{ color: '#dc2626' }}>*</span>
+                Client <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <select
-                value={dealId} onChange={(e) => setDealId(e.target.value)} required
+                value={clientId} onChange={(e) => setClientId(e.target.value)} required
                 style={{
                   width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
                   borderRadius: 4, fontSize: 14, background: '#fff', boxSizing: 'border-box',
                 }}
               >
-                <option value="">Select a deal…</option>
-                {deals.map((d) => (
-                  <option key={d.id} value={d.id}>{dealLabel(d)}</option>
+                <option value="">Select a client…</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             </div>
@@ -297,7 +292,7 @@ export default function Calls() {
             <thead>
               <tr style={{ background: '#1B2838', color: '#fff' }}>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Call date</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Deal</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Client</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Duration</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Audio</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Status</th>
@@ -311,9 +306,9 @@ export default function Calls() {
                     {formatDate(c.call_date || c.created_at)}
                   </td>
                   <td style={{ padding: '10px 16px' }}>
-                    {c.deal_id ? (
-                      <Link to={`/deals/${c.deal_id}`} style={{ color: '#1B2838', textDecoration: 'none' }}>
-                        {c.company_name || `Deal #${c.deal_id}`}
+                    {c.client_id ? (
+                      <Link to={`/clients/${c.client_id}`} style={{ color: '#1B2838', textDecoration: 'none' }}>
+                        {c.client_name || `Client #${c.client_id}`}
                       </Link>
                     ) : <span style={{ color: '#94a3b8' }}>—</span>}
                   </td>

@@ -17,6 +17,13 @@ async function request(path, options = {}) {
   return data;
 }
 
+function qs(params) {
+  if (!params) return '';
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  if (entries.length === 0) return '';
+  return '?' + new URLSearchParams(entries).toString();
+}
+
 export const api = {
   // Auth
   login: (body) => request('/auth/login', { method: 'POST', body }),
@@ -27,67 +34,57 @@ export const api = {
   enableTotp: (body) => request('/auth/enable-totp', { method: 'POST', body }),
   disableTotp: (body) => request('/auth/disable-totp', { method: 'POST', body }),
 
-  // Companies
-  getCompanies: (params) => request(`/companies${params ? '?' + new URLSearchParams(params) : ''}`),
-  getCompany: (id) => request(`/companies/${id}`),
-  createCompany: (body) => request('/companies', { method: 'POST', body }),
-  updateCompany: (id, body) => request(`/companies/${id}`, { method: 'PATCH', body }),
-  deleteCompany: (id) => request(`/companies/${id}`, { method: 'DELETE' }),
+  // Clients (v2)
+  getClients: (params) => request(`/clients${qs(params)}`),
+  getClient: (id) => request(`/clients/${id}`),
+  createClient: (body) => request('/clients', { method: 'POST', body }),
+  updateClient: (id, body) => request(`/clients/${id}`, { method: 'PATCH', body }),
+  deleteClient: (id) => request(`/clients/${id}`, { method: 'DELETE' }),
+  getClientActivities: (id) => request(`/clients/${id}/activities`),
+  recomputeClientFitScore: (id) => request(`/clients/${id}/fit-score/recompute`, { method: 'POST' }),
 
-  // Contacts
-  getContacts: (params) => request(`/contacts${params ? '?' + new URLSearchParams(params) : ''}`),
-  getContact: (id) => request(`/contacts/${id}`),
-  createContact: (body) => request('/contacts', { method: 'POST', body }),
-  updateContact: (id, body) => request(`/contacts/${id}`, { method: 'PATCH', body }),
-  deleteContact: (id) => request(`/contacts/${id}`, { method: 'DELETE' }),
+  // Engagements (v2)
+  getEngagements: (params) => request(`/engagements${qs(params)}`),
+  getEngagement: (id) => request(`/engagements/${id}`),
+  createEngagement: (body) => request('/engagements', { method: 'POST', body }),
+  updateEngagement: (id, body) => request(`/engagements/${id}`, { method: 'PATCH', body }),
+  deleteEngagement: (id) => request(`/engagements/${id}`, { method: 'DELETE' }),
+  getEngagementGenerationStatus: (id) => request(`/engagements/${id}/generation-status`),
+  generateForEngagement: (id, body) => request(`/engagements/${id}/generate`, { method: 'POST', body }),
 
-  // Deals
-  getDeals: (params) => request(`/deals${params ? '?' + new URLSearchParams(params) : ''}`),
-  getDeal: (id) => request(`/deals/${id}`),
-  createDeal: (body) => request('/deals', { method: 'POST', body }),
-  updateDeal: (id, body) => request(`/deals/${id}`, { method: 'PATCH', body }),
-  deleteDeal: (id) => request(`/deals/${id}`, { method: 'DELETE' }),
+  // Enrichment (v2)
+  runEnrichment: (body) => request('/enrichment/run', { method: 'POST', body }),
+  getEnrichment: (clientId) => request(`/enrichment/${clientId}`),
 
-  // Activities
-  getActivities: (params) => request(`/activities${params ? '?' + new URLSearchParams(params) : ''}`),
+  // Activities — now scoped by client_id and/or engagement_id
+  getActivities: (params) => request(`/activities${qs(params)}`),
   createActivity: (body) => request('/activities', { method: 'POST', body }),
 
-  // Tasks
-  getTasks: (params) => request(`/tasks${params ? '?' + new URLSearchParams(params) : ''}`),
-  createTask: (body) => request('/tasks', { method: 'POST', body }),
-  updateTask: (id, body) => request(`/tasks/${id}`, { method: 'PATCH', body }),
-  deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
-
-  // Scripts
-  getScripts: (params) => request(`/scripts${params ? '?' + new URLSearchParams(params) : ''}`),
+  // Scripts (schema unchanged, templates pruned to working/proposal/closed_won)
+  getScripts: (params) => request(`/scripts${qs(params)}`),
   createScript: (body) => request('/scripts', { method: 'POST', body }),
   updateScript: (id, body) => request(`/scripts/${id}`, { method: 'PATCH', body }),
   deleteScript: (id) => request(`/scripts/${id}`, { method: 'DELETE' }),
 
-  // Reports
+  // Reports (v2 — drops /funnel /velocity /time-investment; adds /status /client-revenue)
   getReportSummary: () => request('/reports/summary'),
-  getReportFunnel: () => request('/reports/funnel'),
+  getReportStatus: () => request('/reports/status'),
   getReportSources: () => request('/reports/sources'),
   getReportLostReasons: () => request('/reports/lost-reasons'),
   getReportMonthly: () => request('/reports/monthly'),
-  getReportVelocity: () => request('/reports/velocity'),
-  getReportTimeInvestment: () => request('/reports/time-investment'),
-
-  // Search (cross-entity)
-  search: (q, limit) => request(`/search?q=${encodeURIComponent(q || '')}${limit ? '&limit=' + limit : ''}`),
+  getReportClientRevenue: () => request('/reports/client-revenue'),
 
   // Audit log (admin only)
-  getAuditLog: (params) => request(`/settings/audit-log${params ? '?' + new URLSearchParams(params) : ''}`),
+  getAuditLog: (params) => request(`/settings/audit-log${qs(params)}`),
 
-  // Call recordings — Initiative 1 capture layer
-  getCalls: (params) => request(`/calls${params ? '?' + new URLSearchParams(params) : ''}`),
+  // Call recordings — scoped by client_id and/or engagement_id
+  getCalls: (params) => request(`/calls${qs(params)}`),
   getCall: (id) => request(`/calls/${id}`),
   updateCall: (id, body) => request(`/calls/${id}`, { method: 'PATCH', body }),
   deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
   extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
   pushCallToDashboard: (id) => request(`/calls/${id}/push-to-dashboard`, { method: 'POST' }),
-  // Create accepts FormData (multipart) since it may include an audio file.
-  // Can't use the normal request() helper which assumes JSON.
+  // Multipart create — FormData, not JSON.
   createCall: async (formData) => {
     const res = await fetch(`/api/calls`, {
       method: 'POST',
@@ -99,6 +96,6 @@ export const api = {
     return data;
   },
 
-  // Generic request helper for settings
+  // Generic request helper for settings/integrations pages
   request: (path, options = {}) => request(path, options),
 };
