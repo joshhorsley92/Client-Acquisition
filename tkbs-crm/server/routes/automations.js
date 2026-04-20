@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
-const { isCliAvailable, runCli } = require('../services/claude-cli');
+const { isConfigured: isApiConfigured, runPrompt } = require('../services/claude-api');
 const { buildPrompt } = require('../services/ai-prompts');
 const { getLatestBrandProfile } = require('../services/brand-profile-loader');
 
@@ -51,9 +51,9 @@ router.post('/run', (req, res) => {
     if (!engagement) return res.status(400).json({ error: 'Engagement does not belong to this client' });
   }
 
-  if (!isCliAvailable()) {
+  if (!isApiConfigured()) {
     return res.status(503).json({
-      error: 'Claude Code CLI not installed. Run: npm install -g @anthropic-ai/claude-code',
+      error: 'Claude API not configured — set ANTHROPIC_API_KEY in tkbs-crm/.env',
     });
   }
 
@@ -79,8 +79,8 @@ router.post('/run', (req, res) => {
     status: 'running',
   });
 
-  // Fire Claude asynchronously — never block the HTTP response on CLI runtime.
-  runCli(prompt)
+  // Fire Claude asynchronously — never block the HTTP response on model runtime.
+  runPrompt(prompt)
     .then(({ output }) => {
       req.db.prepare(
         `UPDATE generation_jobs

@@ -231,6 +231,22 @@ export default function CallDetail() {
     }
   };
 
+  const applyToClient = async () => {
+    setProfileError('');
+    try {
+      const result = await api.applyCallToClient(id);
+      const applied = result.applied_paths?.length || 0;
+      const skipped = result.skipped_paths?.length || 0;
+      setSavedMessage(
+        `Applied to client — ${applied} field${applied === 1 ? '' : 's'} updated` +
+        (skipped > 0 ? `, ${skipped} manual field${skipped === 1 ? '' : 's'} preserved.` : '.')
+      );
+      setTimeout(() => setSavedMessage(''), 4000);
+    } catch (err) {
+      setProfileError(err.message || 'Apply failed');
+    }
+  };
+
   if (loading) {
     return <div style={{ padding: 40, fontSize: 13, color: '#64748B' }}>Loading…</div>;
   }
@@ -277,7 +293,7 @@ export default function CallDetail() {
               fontWeight: 600, textDecoration: 'none',
             }}
           >
-            Open deal →
+            Open client →
           </Link>
         )}
       </div>
@@ -427,7 +443,7 @@ export default function CallDetail() {
                 opacity: (extracting || !transcript.trim()) ? 0.6 : 1,
               }}
             >
-              {extracting ? 'Extracting…' : extraction ? 'Re-extract' : '✨ Extract Brand Profile'}
+              {extracting ? 'Extracting…' : extraction ? 'Re-extract' : 'Extract Brand Profile'}
             </button>
           </div>
 
@@ -466,7 +482,7 @@ export default function CallDetail() {
                 fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
                 background: '#E6FAF5', color: '#00D4AA', border: '1px solid #00D4AA',
               }}>
-                ✓ Approved
+                Approved
               </span>
             )}
 
@@ -494,9 +510,22 @@ export default function CallDetail() {
                     cursor: (savingProfile || isApproved) ? 'not-allowed' : 'pointer',
                     opacity: (savingProfile || isApproved) ? 0.6 : 1,
                   }}
-                  title="Approve marks the profile as ready; Automations (proposal generation) reads from the latest approved extraction."
+                  title="Approve marks the extraction as reviewed."
                 >
                   {isApproved ? 'Approved' : 'Approve & mark ready'}
+                </button>
+                <button
+                  onClick={applyToClient}
+                  disabled={savingProfile || profileDirty}
+                  style={{
+                    padding: '8px 16px', background: '#1B2838', color: '#00D4AA',
+                    border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                    cursor: (savingProfile || profileDirty) ? 'not-allowed' : 'pointer',
+                    opacity: (savingProfile || profileDirty) ? 0.6 : 1,
+                  }}
+                  title={profileDirty ? 'Save your edits first, then apply.' : 'Merge this extraction into the client\u2019s canonical Brand Profile. Manual edits on the client are preserved.'}
+                >
+                  Apply to client
                 </button>
               </>
             )}

@@ -4,16 +4,18 @@ const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 
-// Mock the claude-cli spawn before index.js imports it so the tests never
-// actually shell out.
-jest.mock('../services/claude-cli', () => ({
-  isCliAvailable: jest.fn(() => true),
-  runCli: jest.fn(() => Promise.resolve({ output: '# Mocked proposal\n\nContent.' })),
-  runTrackedJob: jest.fn(),
-  buildCliCommand: jest.fn(),
+// Mock the SDK wrapper so tests never hit the real Claude API.
+jest.mock('../services/claude-api', () => ({
+  isConfigured: jest.fn(() => true),
+  runPrompt: jest.fn(() => Promise.resolve({
+    output: '# Mocked proposal\n\nContent.',
+    model: 'claude-sonnet-4-6',
+    usage: { input_tokens: 100, output_tokens: 200 },
+  })),
+  DEFAULT_MODEL: 'claude-sonnet-4-6',
 }));
 
-const claudeCli = require('../services/claude-cli');
+const claudeApi = require('../services/claude-api');
 const { createApp } = require('../index');
 
 function setupTestDb() {
@@ -44,8 +46,8 @@ beforeEach(async () => {
   app = createApp(db);
   agent = request.agent(app);
   await agent.post('/api/auth/login').send({ email: 'test@test.com', password: 'testpass123' });
-  claudeCli.runCli.mockClear();
-  claudeCli.isCliAvailable.mockReturnValue(true);
+  claudeApi.runPrompt.mockClear();
+  claudeApi.isConfigured.mockReturnValue(true);
 });
 
 afterEach(() => { db.close(); });
@@ -85,8 +87,8 @@ describe('POST /api/automations/run — validation', () => {
     const res = await agent.post('/api/automations/run').send({ automation: 'proposal', client_id: 1, engagement_id: 2 });
     expect(res.status).toBe(400);
   });
-  test('503 when the CLI is not installed', async () => {
-    claudeCli.isCliAvailable.mockReturnValue(false);
+  test('503 when ANTHROPIC_API_KEY is not configured', async () => {
+    claudeApi.isConfigured.mockReturnValue(false);
     const res = await agent.post('/api/automations/run').send({ automation: 'proposal', client_id: 1, engagement_id: 1 });
     expect(res.status).toBe(503);
   });
@@ -99,14 +101,14 @@ describe('POST /api/automations/run — happy path', () => {
     expect(res.body.status).toBe('running');
     expect(res.body.job_id).toBeTruthy();
 
-    // Drain the pending promise (runCli resolved immediately via the mock).
+    // Drain the pending promise (runPrompt resolved immediately via the mock).
     await new Promise((r) => setImmediate(r));
 
     const jobRow = db.prepare('SELECT * FROM generation_jobs WHERE id = ?').get(res.body.job_id);
     expect(jobRow.status).toBe('completed');
     expect(jobRow.output).toContain('# Mocked proposal');
-    expect(claudeCli.runCli).toHaveBeenCalledTimes(1);
-    const [prompt] = claudeCli.runCli.mock.calls[0];
+    expect(claudeApi.runPrompt).toHaveBeenCalledTimes(1);
+    const [prompt] = claudeApi.runPrompt.mock.calls[0];
     expect(prompt).toContain('Acme');
   });
 
@@ -130,13 +132,13 @@ describe('POST /api/automations/run — happy path', () => {
 
     await new Promise((r) => setImmediate(r));
 
-    const [prompt] = claudeCli.runCli.mock.calls[0];
+    const [prompt] = claudeApi.runPrompt.mock.calls[0];
     expect(prompt).toContain('BRAND PROFILE');
     expect(prompt).toContain('espresso machines');
   });
 
-  test('failing CLI flips the job to failed with an error message', async () => {
-    claudeCli.runCli.mockRejectedValueOnce(new Error('CLI went boom'));
+  test('a failing model call flips the job to failed with an error message', async () => {
+    claudeApi.runPrompt.mockRejectedValueOnce(new Error('API went boom'));
 
     const res = await agent.post('/api/automations/run').send({ automation: 'proposal', client_id: 1, engagement_id: 1 });
     expect(res.status).toBe(200);
@@ -146,7 +148,7 @@ describe('POST /api/automations/run — happy path', () => {
 
     const jobRow = db.prepare('SELECT * FROM generation_jobs WHERE id = ?').get(jobId);
     expect(jobRow.status).toBe('failed');
-    expect(jobRow.error).toContain('CLI went boom');
+    expect(jobRow.error).toContain('API went boom');
   });
 });
 

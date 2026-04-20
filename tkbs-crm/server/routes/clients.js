@@ -144,7 +144,7 @@ router.patch('/:id', (req, res) => {
     'primary_contact_name', 'email', 'phone', 'role', 'preferred_contact',
     'notes', 'owner_id', 'enrichment_status',
   ];
-  const jsonFields = ['additional_contacts', 'social_links', 'enrichment_data'];
+  const jsonFields = ['additional_contacts', 'social_links', 'enrichment_data', 'brand_profile', 'brand_profile_sources'];
 
   const updates = [];
   const values = [];

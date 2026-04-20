@@ -235,6 +235,76 @@ router.post('/:id/extract-brand-profile', async (req, res) => {
   }
 });
 
+// Merge this call's extracted profile into the client's canonical brand
+// profile, respecting any field paths the user has tagged "manual".
+router.post('/:id/apply-to-client', (req, res) => {
+  const { mergeExtractionIntoClient } = require('../services/brand-profile-merge');
+
+  const call = req.db.prepare('SELECT * FROM call_recordings WHERE id = ?').get(req.params.id);
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!call.extracted_profile_json) {
+    return res.status(400).json({ error: 'No extracted Brand Profile to apply — run Extract first.' });
+  }
+
+  let extraction;
+  try { extraction = JSON.parse(call.extracted_profile_json); } catch (err) {
+    return res.status(400).json({ error: 'Extracted profile JSON is malformed' });
+  }
+  if (!extraction.profile) {
+    return res.status(400).json({ error: 'Extracted profile is empty' });
+  }
+
+  const client = req.db.prepare('SELECT * FROM clients WHERE id = ?').get(call.client_id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  let currentProfile = {};
+  let currentSources = {};
+  try { currentProfile = JSON.parse(client.brand_profile || '{}'); } catch (e) {}
+  try { currentSources = JSON.parse(client.brand_profile_sources || '{}'); } catch (e) {}
+
+  const merged = mergeExtractionIntoClient(
+    currentProfile, currentSources, extraction.profile, call.id,
+  );
+
+  req.db.prepare(
+    `UPDATE clients
+     SET brand_profile = ?, brand_profile_sources = ?, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(
+    JSON.stringify(merged.profile),
+    JSON.stringify(merged.sources),
+    client.id,
+  );
+
+  try {
+    req.db.prepare(
+      `INSERT INTO activities (client_id, engagement_id, type, content, metadata, created_by)
+       VALUES (?, ?, 'system', ?, ?, ?)`
+    ).run(
+      client.id,
+      call.engagement_id || null,
+      `Applied call #${call.id} brand profile to client — ${merged.appliedPaths.length} fields updated, ${merged.skippedPaths.length} manual fields preserved.`,
+      JSON.stringify({ call_id: call.id, applied: merged.appliedPaths, skipped: merged.skippedPaths }),
+      req.user?.id || null,
+    );
+  } catch (e) { /* best-effort */ }
+
+  try {
+    req.audit('brand_profile_applied_to_client', 'client', client.id, {
+      call_id: call.id,
+      applied_count: merged.appliedPaths.length,
+      skipped_count: merged.skippedPaths.length,
+    });
+  } catch (e) {}
+
+  res.json({
+    applied_paths: merged.appliedPaths,
+    skipped_paths: merged.skippedPaths,
+    profile: merged.profile,
+    sources: merged.sources,
+  });
+});
+
 router.get('/:id/audio', (req, res) => {
   const call = req.db.prepare('SELECT audio_path, audio_original_name FROM call_recordings WHERE id = ?').get(req.params.id);
   if (!call || !call.audio_path) return res.status(404).json({ error: 'No audio file for this call' });

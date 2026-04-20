@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
+import BrandProfileEditor from '../components/BrandProfileEditor';
 import {
   markdownToHtml,
   downloadMarkdownAsDocx,
@@ -11,6 +12,7 @@ import {
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
+  { key: 'brand_profile', label: 'Brand Profile' },
   { key: 'engagements', label: 'Engagements' },
   { key: 'calls', label: 'Calls' },
   { key: 'automations', label: 'Automations' },
@@ -112,10 +114,13 @@ export default function ClientDetail() {
       {tab === 'overview' && (
         <OverviewTab client={client} onChange={load} onDelete={() => navigate('/clients')} />
       )}
+      {tab === 'brand_profile' && (
+        <BrandProfileTab client={client} onChange={load} />
+      )}
       {tab === 'engagements' && (
         <EngagementsTab clientId={client.id} engagements={engagements} onChange={load} />
       )}
-      {tab === 'calls' && <CallsTab clientId={client.id} clientName={client.name} />}
+      {tab === 'calls' && <CallsTab clientId={client.id} clientName={client.name} engagements={engagements} />}
       {tab === 'automations' && <AutomationsTab client={client} engagements={engagements} />}
       {tab === 'activity' && <ActivityTab clientId={client.id} />}
     </div>
@@ -152,6 +157,14 @@ function OverviewTab({ client, onChange, onDelete }) {
   useEffect(() => { setForm(hydrate(client)); }, [client.id]);
 
   const update = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
+  const updateSocial = (platform) => (e) => {
+    const v = e.target.value;
+    setForm((p) => {
+      const next = { ...p.social_links };
+      if (v) next[platform] = v; else delete next[platform];
+      return { ...p, social_links: next };
+    });
+  };
 
   const save = async (e) => {
     e.preventDefault();
@@ -234,6 +247,24 @@ function OverviewTab({ client, onChange, onDelete }) {
                 <option value="text">Text</option><option value="linkedin">LinkedIn</option>
               </select>
             </Field>
+          </div>
+
+          <div style={{ borderTop: '1px solid #E2E6EB', margin: '12px 0' }} />
+
+          <div style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 8 }}>
+            Social links
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {SOCIAL_PLATFORMS.map((p) => (
+              <Field key={p.key} label={p.label}>
+                <input
+                  value={form.social_links[p.key] || ''}
+                  onChange={updateSocial(p.key)}
+                  placeholder={p.placeholder}
+                  style={inputStyle}
+                />
+              </Field>
+            ))}
           </div>
 
           <Field label="Notes">
@@ -342,7 +373,19 @@ function OverviewTab({ client, onChange, onDelete }) {
   );
 }
 
+const SOCIAL_PLATFORMS = [
+  { key: 'linkedin',  label: 'LinkedIn',  placeholder: 'https://linkedin.com/company/…' },
+  { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/…' },
+  { key: 'facebook',  label: 'Facebook',  placeholder: 'https://facebook.com/…' },
+  { key: 'twitter',   label: 'X / Twitter', placeholder: 'https://x.com/…' },
+  { key: 'youtube',   label: 'YouTube',   placeholder: 'https://youtube.com/@…' },
+  { key: 'tiktok',    label: 'TikTok',    placeholder: 'https://tiktok.com/@…' },
+  { key: 'pinterest', label: 'Pinterest', placeholder: 'https://pinterest.com/…' },
+];
+
 function hydrate(c) {
+  let social = {};
+  try { social = JSON.parse(c.social_links || '{}') || {}; } catch (e) {}
   return {
     name: c.name || '', website: c.website || '', industry: c.industry || '',
     location: c.location || '', type: c.type || '',
@@ -350,7 +393,107 @@ function hydrate(c) {
     primary_contact_name: c.primary_contact_name || '', email: c.email || '', phone: c.phone || '',
     role: c.role || '', preferred_contact: c.preferred_contact || '',
     notes: c.notes || '',
+    social_links: social,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Brand Profile tab — client-level canonical profile, editable independent
+// of any call. Each edited field is tagged "manual" in brand_profile_sources
+// so a later "Apply to client" from a call extraction won't overwrite it.
+// ---------------------------------------------------------------------------
+
+function BrandProfileTab({ client, onChange }) {
+  const [profile, setProfile] = useState(() => parseJson(client.brand_profile));
+  const [sources, setSources] = useState(() => parseJson(client.brand_profile_sources));
+  const [excludedFields, setExcludedFields] = useState([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    setProfile(parseJson(client.brand_profile));
+    setSources(parseJson(client.brand_profile_sources));
+    setExcludedFields([]);
+    setDirty(false);
+  }, [client.id, client.brand_profile, client.brand_profile_sources]);
+
+  const handleChange = (nextProfile, editedPath, nextExcluded) => {
+    setProfile(nextProfile);
+    if (editedPath) {
+      setSources((prev) => ({ ...prev, [editedPath]: 'manual' }));
+    }
+    if (nextExcluded) setExcludedFields(nextExcluded);
+    setDirty(true);
+  };
+
+  const save = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await api.updateClient(client.id, {
+        brand_profile: profile,
+        brand_profile_sources: sources,
+      });
+      setDirty(false);
+      setMsg('Saved.');
+      onChange();
+    } catch (err) {
+      setMsg(err.message || 'Save failed');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(''), 2500);
+    }
+  };
+
+  const hasData = Object.keys(profile || {}).length > 0;
+  const manualCount = Object.values(sources || {}).filter((s) => s === 'manual').length;
+  const callCount = Object.values(sources || {}).filter((s) => typeof s === 'string' && s.startsWith('call:')).length;
+
+  return (
+    <div>
+      <div style={{ ...panelStyle, marginBottom: 16, borderLeft: '3px solid #00D4AA' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Canonical Brand Profile</div>
+            <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+              Fill this out by hand, or apply a call extraction into it (see the Calls tab → open a call → Apply to client).
+              Any field you edit here is marked <strong>manual</strong> and won't be overwritten by future call applications.
+            </div>
+            {hasData && (
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                {manualCount} manual field{manualCount === 1 ? '' : 's'}
+                {callCount > 0 && ` · ${callCount} from call extractions`}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {dirty && <span style={{ fontSize: 12, color: '#E6A817', fontWeight: 600 }}>Unsaved</span>}
+            {msg && <span style={{ fontSize: 12, color: msg === 'Saved.' ? '#047857' : '#991b1b' }}>{msg}</span>}
+            <button onClick={save} disabled={!dirty || saving} style={{
+              ...primaryBtnStyle,
+              opacity: (!dirty || saving) ? 0.5 : 1,
+              cursor: (!dirty || saving) ? 'not-allowed' : 'pointer',
+            }}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <BrandProfileEditor
+        profile={profile}
+        sidecar={null}
+        excludedFields={excludedFields}
+        sources={sources}
+        onChange={handleChange}
+        disabled={saving}
+      />
+    </div>
+  );
+}
+
+function parseJson(s) {
+  try { return JSON.parse(s || '{}') || {}; } catch (e) { return {}; }
 }
 
 // ---------------------------------------------------------------------------
@@ -571,9 +714,10 @@ function NewEngagementModal({ open, clientId, onClose, onCreated }) {
 // Calls tab
 // ---------------------------------------------------------------------------
 
-function CallsTab({ clientId, clientName }) {
+function CallsTab({ clientId, clientName, engagements }) {
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -592,13 +736,20 @@ function CallsTab({ clientId, clientName }) {
         <div style={{ fontSize: 13, color: '#64748B' }}>
           {calls.length === 0 ? 'No calls recorded yet for this client.' : `${calls.length} call${calls.length === 1 ? '' : 's'}`}
         </div>
-        <Link
-          to={`/calls?client=${clientId}`}
-          style={{ ...primaryBtnStyle, textDecoration: 'none', display: 'inline-block' }}
-        >
-          Go to Calls page →
-        </Link>
+        <button onClick={() => setShowForm((v) => !v)} style={primaryBtnStyle}>
+          {showForm ? 'Cancel' : '+ New Call'}
+        </button>
       </div>
+
+      {showForm && (
+        <NewCallForm
+          clientId={clientId}
+          engagements={engagements}
+          onSaved={() => { setShowForm(false); load(); }}
+          onCancel={() => setShowForm(false)}
+        />
+      )}
+
       {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div> : (
         calls.map((c) => (
           <div key={c.id} style={{ ...panelStyle, marginBottom: 8 }}>
@@ -617,10 +768,113 @@ function CallsTab({ clientId, clientName }) {
           </div>
         ))
       )}
-      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8 }}>
-        Use the Calls page to upload new call audio or transcripts — pre-fills {clientName}.
-      </div>
     </div>
+  );
+}
+
+function NewCallForm({ clientId, engagements, onSaved, onCancel }) {
+  const [engagementId, setEngagementId] = useState('');
+  const [callDate, setCallDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [durationMinutes, setDurationMinutes] = useState('');
+  const [audioFile, setAudioFile] = useState(null);
+  const [transcript, setTranscript] = useState('');
+  const [notes, setNotes] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const fileInputRef = useRef(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!audioFile && !transcript.trim()) {
+      setError('Provide an audio file or paste a transcript (or both).');
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('client_id', clientId);
+      if (engagementId) formData.append('engagement_id', engagementId);
+      if (callDate) formData.append('call_date', callDate);
+      if (durationMinutes) formData.append('duration_minutes', durationMinutes);
+      if (audioFile) formData.append('audio', audioFile);
+      if (transcript.trim()) formData.append('transcript', transcript.trim());
+      if (notes.trim()) formData.append('notes', notes.trim());
+      await api.createCall(formData);
+      onSaved();
+    } catch (err) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ ...panelStyle, marginBottom: 12, borderLeft: '3px solid #00D4AA' }}>
+      {error && <div style={errorStyle}>{error}</div>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Engagement (optional)">
+          <select value={engagementId} onChange={(e) => setEngagementId(e.target.value)} style={inputStyle}>
+            <option value="">— none —</option>
+            {engagements.map((e) => (
+              <option key={e.id} value={e.id}>
+                #{e.id} · {e.status} · ${Number(e.estimated_value || 0).toLocaleString()}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Call date">
+          <input type="date" value={callDate} onChange={(e) => setCallDate(e.target.value)} style={inputStyle} />
+        </Field>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Duration (minutes)">
+          <input
+            type="number" min="0" value={durationMinutes}
+            onChange={(e) => setDurationMinutes(e.target.value)}
+            placeholder="e.g. 45" style={inputStyle}
+          />
+        </Field>
+        <Field label="Audio file (optional)">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,video/*,.mp3,.m4a,.wav,.ogg,.webm,.mp4,.mov,.aac,.flac"
+            onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+            style={{ ...inputStyle, padding: '6px 8px' }}
+          />
+        </Field>
+      </div>
+
+      <Field label="Transcript (paste to skip audio)">
+        <textarea
+          rows={6} value={transcript}
+          onChange={(e) => setTranscript(e.target.value)}
+          placeholder="Paste the transcript here if you already have one (e.g. from Google Meet)…"
+          style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
+        />
+      </Field>
+
+      <Field label="Notes">
+        <textarea
+          rows={2} value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Any context about this call…"
+          style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
+        />
+      </Field>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button type="submit" disabled={uploading} style={primaryBtnStyle}>
+          {uploading ? 'Uploading…' : 'Save call'}
+        </button>
+        <button type="button" onClick={onCancel} disabled={uploading} style={secondaryBtnStyle}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -886,7 +1140,7 @@ function OutputViewer({ title, markdown, client, brandSource, onClose }) {
 
         <div style={{ padding: '12px 20px', borderTop: '1px solid #E2E6EB', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={copy} style={secondaryBtnStyle}>
-            {copied ? '✓ Copied' : 'Copy markdown'}
+            {copied ? 'Copied' : 'Copy markdown'}
           </button>
           <button onClick={() => downloadAsMarkdown(markdown, baseName)} style={secondaryBtnStyle}>
             Download .md

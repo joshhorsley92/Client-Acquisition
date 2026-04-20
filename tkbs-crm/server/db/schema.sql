@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS clients (
   fit_score INTEGER,
   fit_score_breakdown TEXT,
   notes TEXT,
+  brand_profile TEXT NOT NULL DEFAULT '{}',
+  brand_profile_sources TEXT NOT NULL DEFAULT '{}',
   owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

@@ -7,7 +7,6 @@ const navItems = [
   { to: '/', label: 'Home', icon: '◉' },
   { to: '/clients', label: 'Clients', icon: '⌂' },
   { to: '/calls', label: 'Calls', icon: '☎' },
-  { to: '/automations', label: 'Automations', icon: '»' },
   { to: '/reports', label: 'Reports', icon: '▦' },
   { to: '/settings', label: 'Settings', icon: '⚙' },
 ];

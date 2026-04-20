@@ -1,4 +1,9 @@
-import React, { useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
+
+// Lets the main editor broadcast `sources` to every nested FieldRow without
+// threading the prop through ~60 call sites. A null value (the default) means
+// no source pills render — matches the call-extraction use case.
+const SourcesContext = createContext(null);
 
 // ============================================================================
 // Helpers
@@ -73,9 +78,28 @@ function SourceQuotePopover({ entry }) {
   );
 }
 
+function SourcePill({ source }) {
+  if (!source) return null;
+  const isManual = source === 'manual';
+  const label = isManual ? 'manual' : source.startsWith('call:') ? `from call #${source.slice(5)}` : source;
+  const style = isManual
+    ? { bg: '#F1F5F9', color: '#334155', border: '#CBD5E1' }
+    : { bg: '#E6FAF5', color: '#047857', border: '#6EE7B7' };
+  return (
+    <span style={{
+      fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600,
+      background: style.bg, color: style.color, border: `1px solid ${style.border}`,
+    }}>
+      {label}
+    </span>
+  );
+}
+
 function FieldRow({ label, path, sidecar, excluded, onToggleExclude, required, children }) {
   const entry = getSidecarEntry(sidecar, path);
   const colors = confidenceColor(entry?.confidence);
+  const sources = useContext(SourcesContext);
+  const source = sources ? sources[path] : null;
   return (
     <div style={{ marginBottom: 14, opacity: excluded ? 0.5 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -92,19 +116,22 @@ function FieldRow({ label, path, sidecar, excluded, onToggleExclude, required, c
           </span>
         )}
         <SourceQuotePopover entry={entry} />
+        <SourcePill source={source} />
         <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={() => onToggleExclude(path)}
-          style={{
-            background: 'none', border: 'none', fontSize: 11,
-            color: excluded ? '#00D4AA' : '#94a3b8', cursor: 'pointer', padding: 0,
-            fontWeight: 600,
-          }}
-          title={excluded ? 'Include this field when feeding it to automations' : 'Exclude this field from automation generation'}
-        >
-          {excluded ? '+ Include' : '× Reject'}
-        </button>
+        {onToggleExclude && (
+          <button
+            type="button"
+            onClick={() => onToggleExclude(path)}
+            style={{
+              background: 'none', border: 'none', fontSize: 11,
+              color: excluded ? '#00D4AA' : '#94a3b8', cursor: 'pointer', padding: 0,
+              fontWeight: 600,
+            }}
+            title={excluded ? 'Include this field when feeding it to automations' : 'Exclude this field from automation generation'}
+          >
+            {excluded ? '+ Include' : '× Reject'}
+          </button>
+        )}
       </div>
       {children}
     </div>
@@ -284,7 +311,7 @@ function Section({ title, requiredFilled, totalRequired, children }) {
 // ============================================================================
 
 export default function BrandProfileEditor({
-  profile, sidecar, excludedFields, onChange, disabled,
+  profile, sidecar, excludedFields, sources, onChange, disabled,
 }) {
   // Update nested scalar via dotted path
   const setField = (path, value) => {
@@ -344,7 +371,7 @@ export default function BrandProfileEditor({
         background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8,
         padding: 40, textAlign: 'center', fontSize: 13, color: '#64748B',
       }}>
-        No extraction yet. Paste a transcript above and click <strong>✨ Extract Brand Profile</strong>.
+        No extraction yet. Paste a transcript above and click <strong>Extract Brand Profile</strong>.
       </div>
     );
   }
@@ -352,6 +379,7 @@ export default function BrandProfileEditor({
   const req = (path) => REQUIRED.has(path);
 
   return (
+    <SourcesContext.Provider value={sources || null}>
     <div>
       <Section
         title="Business Identity"
@@ -598,5 +626,6 @@ export default function BrandProfileEditor({
         </FieldRow>
       </Section>
     </div>
+    </SourcesContext.Provider>
   );
 }

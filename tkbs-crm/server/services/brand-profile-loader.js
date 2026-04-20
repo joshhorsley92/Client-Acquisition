@@ -1,18 +1,48 @@
 /**
- * Loads the "best" Brand Profile we have for a client, drawn from the
- * extracted_profile_json field on call_recordings.
+ * Loads the "best" Brand Profile we have for a client — the canonical source
+ * of truth for Automations (proposal generation, etc.).
  *
- * Preference order:
- *   1. most recent approved extraction,
- *   2. most recent pending extraction,
- *   3. any extraction, most recent first.
+ * Precedence:
+ *   1. clients.brand_profile if non-empty (manual edits + merged call applications)
+ *   2. Most recent approved call extraction (backward-compat fallback for clients
+ *      that were onboarded before we added the client-level brand profile)
+ *   3. Most recent pending extraction
+ *   4. Any extraction, most recent first
  *
- * Returns `{ profile, source }` or null if no extraction exists for the
- * client. `source` carries metadata the UI can show ("from call on X,
- * reviewed Y") so generated output is traceable.
+ * Returns `{ profile, source }` or null if nothing is available.
  */
 
+function isMeaningful(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  for (const v of Object.values(obj)) {
+    if (v == null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (typeof v === 'object' && Object.keys(v).length === 0) continue;
+    return true;
+  }
+  return false;
+}
+
 function getLatestBrandProfile(db, clientId) {
+  // 1. Client-level canonical profile.
+  const client = db.prepare(
+    'SELECT brand_profile, brand_profile_sources FROM clients WHERE id = ?'
+  ).get(clientId);
+  if (client) {
+    let profile = null;
+    try { profile = JSON.parse(client.brand_profile || '{}'); } catch (e) {}
+    if (isMeaningful(profile)) {
+      let sources = {};
+      try { sources = JSON.parse(client.brand_profile_sources || '{}'); } catch (e) {}
+      return {
+        profile,
+        source: { origin: 'client', sources },
+      };
+    }
+  }
+
+  // 2-4. Fall back to call extractions (legacy clients, or clients that haven't
+  // applied any call yet).
   const rows = db.prepare(`
     SELECT id, extracted_profile_json, review_status, call_date, created_at
     FROM call_recordings
@@ -30,6 +60,7 @@ function getLatestBrandProfile(db, clientId) {
     return {
       profile: payload.profile,
       source: {
+        origin: 'call',
         call_recording_id: row.id,
         review_status: row.review_status,
         call_date: row.call_date,

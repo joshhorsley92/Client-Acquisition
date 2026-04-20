@@ -973,7 +973,7 @@ export default function Settings() {
                     </div>
                   ) : (
                     <div style={{ background: '#E6FAF5', color: '#00D4AA', padding: '6px 12px', borderRadius: 4, fontSize: 12 }}>
-                      ✓ Weights sum to 100
+                      Weights sum to 100
                     </div>
                   );
                 })()}
