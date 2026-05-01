@@ -54,6 +54,7 @@ export default function Clients() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState(SORT_OPTIONS[0]);
   const [showNew, setShowNew] = useState(false);
+  const [showFindNew, setShowFindNew] = useState(false);
 
   // Debounce the search box
   useEffect(() => {
@@ -99,16 +100,34 @@ export default function Clients() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h1 style={{ fontSize: 24, margin: 0 }}>Clients</h1>
-        <button
-          onClick={() => setShowNew(true)}
-          style={{
-            background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
-            padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-          }}
-        >
-          + New Client
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setShowFindNew(true)}
+            style={{
+              background: '#fff', color: '#1B2838', border: '1px solid #E2E6EB', borderRadius: 6,
+              padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            }}
+            title="Run the lead-acquisition pipeline against the Michigan business registry."
+          >
+            Find New Clients
+          </button>
+          <button
+            onClick={() => setShowNew(true)}
+            style={{
+              background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
+              padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            }}
+          >
+            + New Client
+          </button>
+        </div>
       </div>
+
+      <FindNewClientsModal
+        open={showFindNew}
+        onClose={() => setShowFindNew(false)}
+        onJobFinished={() => { setShowFindNew(false); load(); }}
+      />
 
       {/* Status tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -400,4 +419,264 @@ function initialForm() {
     primary_contact_name: '', email: '', phone: '', role: '',
     preferred_contact: '', notes: '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Find New Clients — runs the Python lead-acquisition pipeline (scrape ->
+// enrich -> push). UI lets the user pick which Michigan counties and which
+// industries to target, then polls the resulting scrape_jobs row until it
+// finishes. On success, the parent re-loads the clients list so newly
+// imported leads appear immediately.
+// ---------------------------------------------------------------------------
+
+const ALL_COUNTIES = ['Wayne', 'Oakland', 'Macomb'];
+const ALL_INDUSTRIES = [
+  { key: 'retail/boutique', label: 'Retail / Boutique' },
+  { key: 'contractor_services', label: 'Contractor Services' },
+];
+
+function FindNewClientsModal({ open, onClose, onJobFinished }) {
+  const [counties, setCounties] = useState(new Set(ALL_COUNTIES));
+  const [industries, setIndustries] = useState(new Set(ALL_INDUSTRIES.map((i) => i.key)));
+  const [job, setJob] = useState(null);
+  const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
+
+  // Reset state when re-opened.
+  useEffect(() => {
+    if (!open) return;
+    setJob(null);
+    setError('');
+    setStarting(false);
+    setCounties(new Set(ALL_COUNTIES));
+    setIndustries(new Set(ALL_INDUSTRIES.map((i) => i.key)));
+  }, [open]);
+
+  // Poll the active job until it finishes.
+  useEffect(() => {
+    if (!job || (job.status !== 'pending' && job.status !== 'running')) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const { job: fresh } = await api.getScrapeJob(job.id);
+        if (cancelled) return;
+        setJob(fresh);
+        if (fresh.status === 'succeeded' && onJobFinished) {
+          // small delay so user can see the final summary line render
+          setTimeout(() => { if (!cancelled) onJobFinished(); }, 1200);
+        }
+      } catch (e) { /* keep polling */ }
+    };
+    const handle = setInterval(tick, 1500);
+    return () => { cancelled = true; clearInterval(handle); };
+  }, [job?.id, job?.status, onJobFinished]);
+
+  const toggleCounty = (c) => {
+    const next = new Set(counties);
+    next.has(c) ? next.delete(c) : next.add(c);
+    setCounties(next);
+  };
+  const toggleIndustry = (i) => {
+    const next = new Set(industries);
+    next.has(i) ? next.delete(i) : next.add(i);
+    setIndustries(next);
+  };
+
+  const start = async () => {
+    setError(''); setStarting(true);
+    try {
+      const { job: created } = await api.startScrapeJob({
+        counties: Array.from(counties),
+        industries: Array.from(industries),
+      });
+      setJob(created);
+    } catch (e) {
+      setError(e.message || 'Failed to start');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  if (!open) return null;
+  const running = job && (job.status === 'pending' || job.status === 'running');
+  const finished = job && (job.status === 'succeeded' || job.status === 'failed');
+  const handleClose = () => { if (!running) onClose(); };
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Find New Clients">
+      <div style={{ fontSize: 13, color: '#64748B', marginBottom: 14, lineHeight: 1.5 }}>
+        Runs the lead-acquisition pipeline against the Michigan LARA business
+        registry. Filters by county and industry, enriches each match with
+        marketing signals, and creates a CRM client for every new lead.
+        Already-imported leads are skipped.
+      </div>
+
+      {!job && (
+        <>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#1B2838', marginBottom: 6 }}>Counties</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {ALL_COUNTIES.map((c) => (
+                <CheckPill key={c} checked={counties.has(c)} onClick={() => toggleCounty(c)} label={c} />
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#1B2838', marginBottom: 6 }}>Industries</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {ALL_INDUSTRIES.map((i) => (
+                <CheckPill key={i.key} checked={industries.has(i.key)} onClick={() => toggleIndustry(i.key)} label={i.label} />
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <div style={{
+              background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
+              padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
+            }}>{error}</div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '8px 16px', background: '#fff', color: '#1B2838',
+                border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >Cancel</button>
+            <button
+              type="button"
+              onClick={start}
+              disabled={starting || counties.size === 0 || industries.size === 0}
+              style={{
+                padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
+                border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                cursor: (starting || counties.size === 0 || industries.size === 0) ? 'not-allowed' : 'pointer',
+                opacity: (starting || counties.size === 0 || industries.size === 0) ? 0.6 : 1,
+              }}
+            >
+              {starting ? 'Starting…' : 'Run search'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {job && (
+        <ScrapeJobProgress job={job} running={running} finished={finished} onClose={handleClose} />
+      )}
+    </Modal>
+  );
+}
+
+function CheckPill({ checked, onClick, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '6px 14px', fontSize: 12,
+        borderRadius: 14,
+        border: `1px solid ${checked ? '#00D4AA' : '#E2E6EB'}`,
+        background: checked ? '#E6FAF5' : '#fff',
+        color: checked ? '#047857' : '#64748B',
+        fontWeight: 600, cursor: 'pointer',
+      }}
+    >
+      {checked ? '✓ ' : ''}{label}
+    </button>
+  );
+}
+
+function ScrapeJobProgress({ job, running, finished, onClose }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 11, padding: '3px 10px', borderRadius: 10, fontWeight: 600,
+          background: job.status === 'succeeded' ? '#E6FAF5'
+                     : job.status === 'failed' ? '#FEF2F2'
+                     : '#FFF3E0',
+          color: job.status === 'succeeded' ? '#047857'
+                : job.status === 'failed' ? '#991b1b'
+                : '#A16207',
+          border: `1px solid ${job.status === 'succeeded' ? '#6EE7B7'
+                              : job.status === 'failed' ? '#FCA5A5'
+                              : '#FCD34D'}`,
+        }}>
+          {job.status === 'pending' ? 'Queued'
+            : job.status === 'running' ? 'Running…'
+            : job.status === 'succeeded' ? 'Completed'
+            : job.status === 'failed' ? 'Failed'
+            : job.status}
+        </span>
+        <span style={{ fontSize: 11, color: '#94a3b8' }}>Job #{job.id}</span>
+      </div>
+
+      {running && (
+        <div className="tkbs-bar-track" style={{ marginBottom: 12 }}>
+          <div className="tkbs-bar-fill" />
+        </div>
+      )}
+
+      {finished && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+          padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 12,
+        }}>
+          <Stat label="Imported" value={job.pushed_count} accent="#00D4AA" />
+          <Stat label="Skipped" value={job.skipped_count} accent="#64748B" />
+          <Stat label="Errors" value={job.error_count} accent={job.error_count > 0 ? '#dc2626' : '#94a3b8'} />
+        </div>
+      )}
+
+      {job.error && (
+        <div style={{
+          background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
+          padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
+        }}>{job.error}</div>
+      )}
+
+      <details style={{ marginBottom: 12 }}>
+        <summary style={{ fontSize: 12, color: '#64748B', cursor: 'pointer' }}>
+          View pipeline log
+        </summary>
+        <pre style={{
+          marginTop: 8, fontSize: 11, color: '#1B2838', background: '#F7F8FA',
+          border: '1px solid #E2E6EB', borderRadius: 4, padding: 10,
+          maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{job.log_output || '(no output yet)'}</pre>
+      </details>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={running}
+          style={{
+            padding: '8px 16px', background: finished ? '#00D4AA' : '#fff',
+            color: '#1B2838',
+            border: finished ? 'none' : '1px solid #E2E6EB',
+            borderRadius: 4, fontSize: 13, fontWeight: 600,
+            cursor: running ? 'not-allowed' : 'pointer',
+            opacity: running ? 0.6 : 1,
+          }}
+        >
+          {running ? 'Running…' : finished ? 'Close' : 'Cancel'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{value ?? 0}</div>
+      <div style={{ fontSize: 11, color: '#64748B' }}>{label}</div>
+    </div>
+  );
 }

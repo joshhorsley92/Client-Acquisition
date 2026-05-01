@@ -113,6 +113,38 @@ function migrateBrandProfileOnClients(database) {
   return changed;
 }
 
+// Scraper bridge (2026-05-01): track upstream Python lead origin on clients
+// so we can dedup pushes, badge the source on the UI, and link back to the
+// original platform listing.
+function migrateScraperSource(database) {
+  if (!hasTable(database, 'clients')) return false;
+  let changed = false;
+  const cols = ['source_lead_id', 'source_platform', 'source_url', 'source_imported_at'];
+  for (const col of cols) {
+    if (!hasColumn(database, 'clients', col)) {
+      database.exec(`ALTER TABLE clients ADD COLUMN ${col} TEXT`);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Whisper auto-transcription (2026-05-01): track async transcription state
+// on call_recordings so the UI can poll and the API can surface failures.
+function migrateWhisperTranscription(database) {
+  if (!hasTable(database, 'call_recordings')) return false;
+  let changed = false;
+  if (!hasColumn(database, 'call_recordings', 'transcript_status')) {
+    database.exec("ALTER TABLE call_recordings ADD COLUMN transcript_status TEXT");
+    changed = true;
+  }
+  if (!hasColumn(database, 'call_recordings', 'transcript_error')) {
+    database.exec("ALTER TABLE call_recordings ADD COLUMN transcript_error TEXT");
+    changed = true;
+  }
+  return changed;
+}
+
 function initDb() {
   const database = getDb();
 
@@ -124,6 +156,12 @@ function initDb() {
 
   const brandProfileAdded = migrateBrandProfileOnClients(database);
   if (brandProfileAdded) console.log('Added brand_profile + brand_profile_sources columns to clients.');
+
+  const scraperSourceAdded = migrateScraperSource(database);
+  if (scraperSourceAdded) console.log('Added source_lead_id + source_platform + source_url + source_imported_at columns to clients.');
+
+  const whisperAdded = migrateWhisperTranscription(database);
+  if (whisperAdded) console.log('Added transcript_status + transcript_error columns to call_recordings.');
 
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
   database.exec(schema);

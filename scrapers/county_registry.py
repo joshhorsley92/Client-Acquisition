@@ -9,17 +9,35 @@ from config import SCRAPER_DEFAULTS
 logger = logging.getLogger(__name__)
 
 INDUSTRY_MAP = {
+    # Retail
     "retail trade": "retail/boutique",
-    "electronic commerce": "e-commerce",
-    "e-commerce": "e-commerce",
     "retail": "retail/boutique",
     "boutique": "retail/boutique",
+    "specialty retail": "retail/boutique",
+    "apparel": "retail/boutique",
+    # Contractor / trade services (Joe's ICP — Michigan trades + home services)
+    "construction": "contractor_services",
+    "general contractor": "contractor_services",
+    "contractor": "contractor_services",
+    "contracting": "contractor_services",
+    "plumbing": "contractor_services",
+    "electrical": "contractor_services",
+    "hvac": "contractor_services",
+    "roofing": "contractor_services",
+    "landscaping": "contractor_services",
+    "remodeling": "contractor_services",
+    "home services": "contractor_services",
+    "home improvement": "contractor_services",
+    # Kept for back-compat with existing leads but de-prioritized in CRM ICP
+    "electronic commerce": "e-commerce",
+    "e-commerce": "e-commerce",
     "startup": "crowdfunding/startup",
 }
 
+# TKBS does not target these industries — Joe excluded them from ICP because
+# they have specialized marketing channels we don't serve well.
 SKIP_TYPES = {
-    "legal services", "medical", "healthcare", "insurance",
-    "accounting", "construction", "plumbing", "electrical",
+    "legal services", "medical", "healthcare", "insurance", "accounting",
 }
 
 class CountyRegistryScraper:
@@ -28,6 +46,9 @@ class CountyRegistryScraper:
     def __init__(self, db):
         self.db = db
         self.counties = SCRAPER_DEFAULTS["target_counties"]
+        # Industry filter — only keep leads whose mapped category appears here.
+        # Defaults from config; override via TKBS_INDUSTRIES env var.
+        self.target_industries = set(SCRAPER_DEFAULTS["target_industries"])
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -49,7 +70,10 @@ class CountyRegistryScraper:
         bt_lower = business_type.lower().strip()
         if bt_lower in SKIP_TYPES:
             return False
-        return bt_lower in INDUSTRY_MAP
+        if bt_lower not in INDUSTRY_MAP:
+            return False
+        # Honor the run-time industry filter (set by TKBS_INDUSTRIES env var).
+        return INDUSTRY_MAP[bt_lower] in self.target_industries
 
     def _map_industry(self, business_type: str) -> str:
         bt_lower = business_type.lower().strip()

@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS clients (
   notes TEXT,
   brand_profile TEXT NOT NULL DEFAULT '{}',
   brand_profile_sources TEXT NOT NULL DEFAULT '{}',
+  source_lead_id TEXT,
+  source_platform TEXT,
+  source_url TEXT,
+  source_imported_at TEXT,
   owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,6 +51,11 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE INDEX IF NOT EXISTS idx_clients_owner_id ON clients(owner_id);
 CREATE INDEX IF NOT EXISTS idx_clients_created_at ON clients(created_at DESC);
+-- One CRM client per upstream Python lead. Partial UNIQUE so manual-entry
+-- clients (NULL source_lead_id) don't collide.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_source_lead_id_unique
+  ON clients(source_lead_id) WHERE source_lead_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_clients_source_platform ON clients(source_platform);
 
 -- One row per sale/project under a client. A client may have many engagements
 -- over time (Launch this year, Boost next year). Status drives the workflow.
@@ -208,6 +217,8 @@ CREATE TABLE IF NOT EXISTS call_recordings (
   audio_size_bytes INTEGER,
   transcript TEXT,
   transcript_source TEXT CHECK(transcript_source IN ('pasted', 'whisper', 'zoom', 'meet', 'manual')),
+  transcript_status TEXT CHECK(transcript_status IN ('pending', 'processing', 'done', 'failed')),
+  transcript_error TEXT,
   notes TEXT,
   extracted_profile_json TEXT,
   review_status TEXT NOT NULL DEFAULT 'none' CHECK(review_status IN ('none', 'pending', 'approved', 'rejected')),
@@ -219,3 +230,25 @@ CREATE TABLE IF NOT EXISTS call_recordings (
 CREATE INDEX IF NOT EXISTS idx_call_recordings_client_id ON call_recordings(client_id);
 CREATE INDEX IF NOT EXISTS idx_call_recordings_engagement_id ON call_recordings(engagement_id);
 CREATE INDEX IF NOT EXISTS idx_call_recordings_created_at ON call_recordings(created_at DESC);
+
+-- Lead-acquisition pipeline jobs. Each row tracks one click of "Find new
+-- clients" — captures the parameters chosen, the subprocess output, and
+-- the import counts so the UI can show results and we have a history.
+CREATE TABLE IF NOT EXISTS scrape_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+  params TEXT NOT NULL DEFAULT '{}',
+  log_output TEXT,
+  error TEXT,
+  pushed_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT,
+  finished_at TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_scrape_jobs_created_at ON scrape_jobs(created_at DESC);

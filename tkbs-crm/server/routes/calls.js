@@ -7,6 +7,15 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
+const { transcribeCallRecording } = require('../services/whisper-transcriber');
+
+// Fire-and-forget kickoff: run Whisper in the background, swallow any throw
+// (errors are persisted to transcript_error inside the service).
+function startTranscription(db, callId) {
+  Promise.resolve()
+    .then(() => transcribeCallRecording(db, callId))
+    .catch((err) => console.error(`Whisper transcription crashed for call ${callId}:`, err));
+}
 
 router.use(requireAuth);
 
@@ -103,14 +112,17 @@ router.post('/', upload.single('audio'), (req, res) => {
     ? path.relative(path.join(__dirname, '..', '..'), req.file.path).replace(/\\/g, '/')
     : null;
   const transcriptSource = transcript?.trim() ? 'pasted' : null;
+  // If audio is attached and no transcript was pasted, queue Whisper.
+  const willTranscribe = !!req.file && !transcript?.trim();
+  const transcriptStatus = willTranscribe ? 'pending' : null;
 
   const result = req.db.prepare(`
     INSERT INTO call_recordings (
       client_id, engagement_id, call_date, duration_minutes,
       audio_path, audio_original_name, audio_size_bytes,
-      transcript, transcript_source, notes, created_by
+      transcript, transcript_source, transcript_status, notes, created_by
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     parseInt(client_id, 10),
     engagement_id ? parseInt(engagement_id, 10) : null,
@@ -121,6 +133,7 @@ router.post('/', upload.single('audio'), (req, res) => {
     req.file?.size || null,
     transcript?.trim() || null,
     transcriptSource,
+    transcriptStatus,
     notes || null,
     req.user.id,
   );
@@ -130,7 +143,10 @@ router.post('/', upload.single('audio'), (req, res) => {
     engagement_id: engagement_id ? parseInt(engagement_id, 10) : null,
     has_audio: !!req.file,
     has_transcript: !!transcript?.trim(),
+    will_transcribe: willTranscribe,
   });
+
+  if (willTranscribe) startTranscription(req.db, result.lastInsertRowid);
 
   const call = req.db.prepare('SELECT * FROM call_recordings WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json({ call });
@@ -161,6 +177,13 @@ router.patch('/:id', (req, res) => {
     updates.push('transcript_source = ?');
     values.push(req.body.transcript?.trim() ? 'pasted' : null);
   }
+  // If a transcript is pasted/edited, clear any stale Whisper status + error.
+  if (req.body.transcript !== undefined && req.body.transcript_status === undefined) {
+    updates.push('transcript_status = ?');
+    values.push(req.body.transcript?.trim() ? 'done' : null);
+    updates.push('transcript_error = ?');
+    values.push(null);
+  }
 
   updates.push("updated_at = datetime('now')");
   values.push(req.params.id);
@@ -184,6 +207,35 @@ router.delete('/:id', (req, res) => {
   req.db.prepare('DELETE FROM call_recordings WHERE id = ?').run(req.params.id);
   req.audit('call_recording_deleted', 'call_recording', req.params.id, {});
   res.json({ ok: true });
+});
+
+// Trigger (or retry) Whisper auto-transcription for an existing call. Returns
+// immediately; the actual API request runs in the background and the row's
+// transcript_status / transcript_error are updated when it finishes.
+router.post('/:id/transcribe', (req, res) => {
+  const call = req.db.prepare('SELECT * FROM call_recordings WHERE id = ?').get(req.params.id);
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!call.audio_path) {
+    return res.status(400).json({ error: 'This call has no audio file to transcribe.' });
+  }
+  if (call.transcript_status === 'pending' || call.transcript_status === 'processing') {
+    return res.status(409).json({ error: 'Transcription is already in progress.' });
+  }
+
+  req.db.prepare(
+    `UPDATE call_recordings
+     SET transcript_status = 'pending', transcript_error = NULL, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(req.params.id);
+
+  req.audit('call_recording_transcribe_requested', 'call_recording', req.params.id, {
+    is_retry: !!call.transcript || call.transcript_status === 'failed',
+  });
+
+  startTranscription(req.db, parseInt(req.params.id, 10));
+
+  const updated = req.db.prepare('SELECT * FROM call_recordings WHERE id = ?').get(req.params.id);
+  res.status(202).json({ call: updated });
 });
 
 // Extract Brand Profile from transcript via Claude.

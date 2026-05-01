@@ -89,6 +89,12 @@ export const api = {
   deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
   extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
   applyCallToClient: (id) => request(`/calls/${id}/apply-to-client`, { method: 'POST' }),
+  transcribeCall: (id) => request(`/calls/${id}/transcribe`, { method: 'POST' }),
+
+  // Lead-acquisition pipeline jobs
+  listScrapeJobs: () => request('/scrape-jobs'),
+  getScrapeJob: (id) => request(`/scrape-jobs/${id}`),
+  startScrapeJob: (params) => request('/scrape-jobs', { method: 'POST', body: params }),
   // Multipart create — FormData, not JSON.
   createCall: async (formData) => {
     const res = await fetch(`/api/calls`, {

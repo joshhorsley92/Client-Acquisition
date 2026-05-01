@@ -64,6 +64,10 @@ export default function CallDetail() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
 
+  // Whisper transcription state
+  const [transcribeError, setTranscribeError] = useState('');
+  const [requestingTranscribe, setRequestingTranscribe] = useState(false);
+
   // Load call
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +85,27 @@ export default function CallDetail() {
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [id]);
+
+  // Poll while Whisper is running. Stops as soon as the row leaves
+  // pending/processing or the user starts editing the transcript locally.
+  const transcribing = call?.transcript_status === 'pending' || call?.transcript_status === 'processing';
+  useEffect(() => {
+    if (!transcribing) return;
+    if (transcriptDirty) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const fresh = await api.getCall(id);
+        if (cancelled) return;
+        setCall(fresh.call);
+        if (fresh.call.transcript_status === 'done' && fresh.call.transcript && !transcriptDirty) {
+          setTranscript(fresh.call.transcript);
+        }
+      } catch { /* keep polling */ }
+    };
+    const handle = setInterval(tick, 3000);
+    return () => { cancelled = true; clearInterval(handle); };
+  }, [id, transcribing, transcriptDirty]);
 
   function loadExtractionFromCall(callRow) {
     if (!callRow?.extracted_profile_json) {
@@ -118,6 +143,18 @@ export default function CallDetail() {
   }, [editedProfile]);
 
   const isApproved = call?.review_status === 'approved' && !profileDirty;
+
+  const requestTranscribe = async () => {
+    setTranscribeError(''); setRequestingTranscribe(true);
+    try {
+      const { call: updated } = await api.transcribeCall(id);
+      setCall(updated);
+    } catch (err) {
+      setTranscribeError(err.message || 'Failed to start transcription');
+    } finally {
+      setRequestingTranscribe(false);
+    }
+  };
 
   const saveTranscript = async () => {
     setSavingTranscript(true); setSavedMessage('');
@@ -303,21 +340,66 @@ export default function CallDetail() {
         <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Transcript</h3>
-            <div style={{ fontSize: 11, color: '#64748B' }}>
-              {call.transcript_source ? `Source: ${call.transcript_source}` : 'No transcript yet'}
-              {wordCount > 0 && ` · ${wordCount} words`}
+            <div style={{ fontSize: 11, color: '#64748B', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {transcribing && (
+                <span style={{
+                  fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                  background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817',
+                }}>
+                  {call.transcript_status === 'processing' ? 'Transcribing…' : 'Queued'}
+                </span>
+              )}
+              {call.transcript_status === 'failed' && (
+                <span style={{
+                  fontSize: 11, padding: '2px 10px', borderRadius: 10, fontWeight: 600,
+                  background: '#FEE2E2', color: '#dc2626', border: '1px solid #dc2626',
+                }}>
+                  Transcription failed
+                </span>
+              )}
+              <span>
+                {call.transcript_source ? `Source: ${call.transcript_source}` : 'No transcript yet'}
+                {wordCount > 0 && ` · ${wordCount} words`}
+              </span>
             </div>
           </div>
+
+          {call.transcript_status === 'failed' && call.transcript_error && (
+            <div style={{
+              background: '#FEE2E2', color: '#dc2626', border: '1px solid #dc2626',
+              padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
+            }}>
+              {call.transcript_error}
+            </div>
+          )}
+
+          {transcribeError && (
+            <div style={{
+              background: '#FFF3E0', color: '#E6A817', border: '1px solid #E6A817',
+              padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
+            }}>
+              {transcribeError}
+            </div>
+          )}
 
           <textarea
             value={transcript}
             onChange={(e) => { setTranscript(e.target.value); setTranscriptDirty(true); }}
-            placeholder="No transcript yet. Paste one here, or wait for Whisper auto-transcription (coming soon)."
+            placeholder={
+              transcribing
+                ? 'Whisper is transcribing this call — sit tight, this usually takes under a minute.'
+                : call.audio_path
+                  ? 'No transcript yet. Paste one here, or click Transcribe to run Whisper on the audio.'
+                  : 'No transcript yet. Paste one here.'
+            }
             rows={18}
+            disabled={transcribing}
             style={{
               width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
               borderRadius: 4, fontSize: 13, fontFamily: 'inherit',
               resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.5,
+              background: transcribing ? '#F7F8FA' : '#fff',
+              cursor: transcribing ? 'wait' : 'text',
             }}
           />
 
@@ -337,16 +419,47 @@ export default function CallDetail() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <button
-              onClick={saveTranscript} disabled={!transcriptDirty || savingTranscript}
+              onClick={saveTranscript} disabled={!transcriptDirty || savingTranscript || transcribing}
               style={{
                 padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
                 border: 'none', borderRadius: 4, fontSize: 14, fontWeight: 600,
-                cursor: (!transcriptDirty || savingTranscript) ? 'not-allowed' : 'pointer',
-                opacity: (!transcriptDirty || savingTranscript) ? 0.6 : 1,
+                cursor: (!transcriptDirty || savingTranscript || transcribing) ? 'not-allowed' : 'pointer',
+                opacity: (!transcriptDirty || savingTranscript || transcribing) ? 0.6 : 1,
               }}
             >
               {savingTranscript ? 'Saving…' : 'Save transcript'}
             </button>
+            {call.audio_path && (
+              <button
+                onClick={requestTranscribe}
+                disabled={requestingTranscribe || transcribing || transcriptDirty}
+                className={transcribing ? 'tkbs-busy' : undefined}
+                title={
+                  transcriptDirty
+                    ? 'Save your edits first — Whisper will overwrite the transcript.'
+                    : call.transcript
+                      ? 'Re-run Whisper. This will overwrite the current transcript.'
+                      : 'Run Whisper on the uploaded audio.'
+                }
+                style={{
+                  padding: '8px 16px',
+                  background: transcribing ? '#E6A817' : '#fff',
+                  color: transcribing ? '#fff' : '#1B2838',
+                  border: transcribing ? 'none' : '1px solid #E2E6EB',
+                  borderRadius: 4, fontSize: 13, fontWeight: 600,
+                  cursor: (requestingTranscribe || transcribing || transcriptDirty) ? 'not-allowed' : 'pointer',
+                  opacity: transcribing ? 1 : ((requestingTranscribe || transcriptDirty) ? 0.6 : 1),
+                }}
+              >
+                {transcribing
+                  ? 'Transcribing…'
+                  : call.transcript_status === 'failed'
+                    ? 'Retry transcription'
+                    : call.transcript
+                      ? 'Re-transcribe'
+                      : 'Transcribe with Whisper'}
+              </button>
+            )}
             {savedMessage && (
               <span style={{ fontSize: 12, color: '#00D4AA', fontWeight: 600 }}>{savedMessage}</span>
             )}
@@ -433,18 +546,29 @@ export default function CallDetail() {
             <button
               onClick={handleExtractClick}
               disabled={extracting || !transcript.trim()}
+              className={extracting ? 'tkbs-busy' : undefined}
               style={{
                 width: '100%', padding: '8px 12px',
-                background: extraction ? '#fff' : '#00D4AA',
+                background: extracting ? '#00D4AA' : extraction ? '#fff' : '#00D4AA',
                 color: '#1B2838',
-                border: extraction ? '1px solid #E2E6EB' : 'none',
+                border: extracting ? 'none' : extraction ? '1px solid #E2E6EB' : 'none',
                 borderRadius: 4, fontSize: 13, fontWeight: 600,
                 cursor: (extracting || !transcript.trim()) ? 'not-allowed' : 'pointer',
-                opacity: (extracting || !transcript.trim()) ? 0.6 : 1,
+                opacity: extracting ? 1 : (!transcript.trim() ? 0.6 : 1),
               }}
             >
               {extracting ? 'Extracting…' : extraction ? 'Re-extract' : 'Extract Brand Profile'}
             </button>
+            {extracting && (
+              <div style={{ marginTop: 8 }}>
+                <div className="tkbs-bar-track">
+                  <div className="tkbs-bar-fill" />
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, textAlign: 'center' }}>
+                  Asking Claude to synthesize the brand profile — usually 5–15 seconds.
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16 }}>

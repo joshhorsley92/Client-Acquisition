@@ -6,9 +6,9 @@
   "hourly_rate_usd": 100,
 
   "target_industries": {
-    "included": ["retail", "service", "b2b"],
-    "excluded": ["large_corporation", "art_sector", "raw_materials"],
-    "notes": "Rough tags — real deal classification happens via normalized keywords matched against company industry + description."
+    "included": ["retail", "boutique", "service", "contractor", "b2b"],
+    "excluded": ["large_corporation", "art_sector", "raw_materials", "legal", "medical", "healthcare", "insurance", "accounting"],
+    "notes": "Rough tags — real deal classification happens via normalized keywords matched against company industry + description. 'contractor' covers Michigan trades (HVAC, plumbing, electrical, roofing, landscaping, remodeling)."
   },
 
   "revenue_range": {

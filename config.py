@@ -36,12 +36,29 @@ PITCH_MAP = {
     ),
 }
 
+def _csv_env(name: str, default: list[str]) -> list[str]:
+    """Read a comma-separated env var into a list, falling back to default if unset."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# Defaults match TKBS's current ICP: Michigan trades + retail. Override per
+# run by setting TKBS_COUNTIES / TKBS_INDUSTRIES (the CRM's "Find new
+# clients" button does this when the user picks scope checkboxes).
 SCRAPER_DEFAULTS = {
     "min_reviews": 100,
     "rate_limit_min": 2,
     "rate_limit_max": 5,
-    "target_industries": ["e-commerce", "retail/boutique", "crowdfunding/startup"],
-    "target_counties": ["Wayne", "Oakland", "Macomb"],
+    "target_industries": _csv_env(
+        "TKBS_INDUSTRIES",
+        ["retail/boutique", "contractor_services"],
+    ),
+    "target_counties": _csv_env(
+        "TKBS_COUNTIES",
+        ["Wayne", "Oakland", "Macomb"],
+    ),
 }
 
 

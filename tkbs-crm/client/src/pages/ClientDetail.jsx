@@ -127,6 +127,59 @@ export default function ClientDetail() {
   );
 }
 
+// Maps a Python scraper's `platform_source` value to a human label and a
+// hint about the lead's origin. Add entries here as new scrapers come
+// online — generic fallback handles unknown platforms gracefully.
+const SOURCE_LABELS = {
+  county_registry: { label: 'Michigan LARA registry', detail: 'Newly-registered Michigan business' },
+  etsy: { label: 'Etsy', detail: 'Etsy shop listing' },
+  kickstarter: { label: 'Kickstarter', detail: 'Kickstarter campaign' },
+};
+
+function SourcePanel({ client, enrichment }) {
+  const meta = SOURCE_LABELS[client.source_platform] || {
+    label: client.source_platform || 'External scraper',
+    detail: null,
+  };
+  const isHttp = typeof client.source_url === 'string' && /^https?:\/\//i.test(client.source_url);
+  return (
+    <div style={{ fontSize: 12, color: '#64748B' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2838' }}>{meta.label}</div>
+      {meta.detail && <div style={{ marginTop: 2 }}>{meta.detail}</div>}
+      {client.source_imported_at && (
+        <div style={{ marginTop: 6 }}>
+          <strong>Imported:</strong> {fmtDateTime(client.source_imported_at)}
+        </div>
+      )}
+      {(enrichment?.review_count != null || enrichment?.rating != null) && (
+        <div style={{ marginTop: 6 }}>
+          <strong>At scrape time:</strong>{' '}
+          {enrichment?.review_count != null && `${enrichment.review_count} reviews`}
+          {enrichment?.review_count != null && enrichment?.rating != null && ' · '}
+          {enrichment?.rating != null && `${enrichment.rating}★`}
+        </div>
+      )}
+      {isHttp && (
+        <div style={{ marginTop: 8 }}>
+          <a
+            href={client.source_url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: '#00D4AA', wordBreak: 'break-all' }}
+          >
+            View source listing →
+          </a>
+        </div>
+      )}
+      {!isHttp && client.source_url && (
+        <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', wordBreak: 'break-all' }}>
+          {client.source_url}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EnrichmentBadge({ status }) {
   if (!status || status === 'none') return null;
   const tones = {
@@ -282,6 +335,13 @@ function OverviewTab({ client, onChange, onDelete }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {client.source_lead_id && (
+          <div style={panelStyle}>
+            <PanelTitle>Source</PanelTitle>
+            <SourcePanel client={client} enrichment={enrichment} />
+          </div>
+        )}
+
         <div style={panelStyle}>
           <PanelTitle>Fit score</PanelTitle>
           {client.fit_score == null ? (
