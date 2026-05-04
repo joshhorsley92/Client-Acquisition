@@ -120,4 +120,89 @@ describe('POST /api/calls/:id/apply-to-client', () => {
     expect(acts.length).toBeGreaterThan(0);
     expect(acts[acts.length - 1].content).toMatch(/Applied call/);
   });
+
+  test('honors per-path "take" choice over manual tag', async () => {
+    db.prepare('UPDATE clients SET brand_profile = ?, brand_profile_sources = ? WHERE id = 1').run(
+      JSON.stringify({ business_name: 'Manual Edit' }),
+      JSON.stringify({ business_name: 'manual' }),
+    );
+    const callId = insertCallWithExtraction(db, 1, {
+      profile: { business_name: 'Extracted Name' },
+    });
+    const res = await agent.post(`/api/calls/${callId}/apply-to-client`)
+      .send({ choices: { business_name: 'take' } });
+    expect(res.status).toBe(200);
+    expect(res.body.applied_paths).toContain('business_name');
+
+    const row = db.prepare('SELECT brand_profile FROM clients WHERE id = 1').get();
+    expect(JSON.parse(row.brand_profile).business_name).toBe('Extracted Name');
+  });
+
+  test('honors per-path "keep" choice and locks the path as manual', async () => {
+    db.prepare('UPDATE clients SET brand_profile = ?, brand_profile_sources = ? WHERE id = 1').run(
+      JSON.stringify({ business_name: 'Old' }),
+      JSON.stringify({ business_name: 'call:3' }),
+    );
+    const callId = insertCallWithExtraction(db, 1, {
+      profile: { business_name: 'New' },
+    });
+    const res = await agent.post(`/api/calls/${callId}/apply-to-client`)
+      .send({ choices: { business_name: 'keep' } });
+    expect(res.status).toBe(200);
+    expect(res.body.skipped_paths).toContain('business_name');
+
+    const row = db.prepare('SELECT brand_profile, brand_profile_sources FROM clients WHERE id = 1').get();
+    expect(JSON.parse(row.brand_profile).business_name).toBe('Old');
+    expect(JSON.parse(row.brand_profile_sources).business_name).toBe('manual');
+  });
+
+  test('returns merged_paths for array unions', async () => {
+    db.prepare('UPDATE clients SET brand_profile = ?, brand_profile_sources = ? WHERE id = 1').run(
+      JSON.stringify({ customer_avatar: { pain_points: ['slow leads', 'no analytics'] } }),
+      JSON.stringify({ 'customer_avatar.pain_points': 'call:3' }),
+    );
+    const callId = insertCallWithExtraction(db, 1, {
+      profile: { customer_avatar: { pain_points: ['no analytics', 'no SEO'] } },
+    });
+    const res = await agent.post(`/api/calls/${callId}/apply-to-client`);
+    expect(res.status).toBe(200);
+    expect(res.body.merged_paths).toContain('customer_avatar.pain_points');
+
+    const row = db.prepare('SELECT brand_profile FROM clients WHERE id = 1').get();
+    const points = JSON.parse(row.brand_profile).customer_avatar.pain_points;
+    expect(points.sort()).toEqual(['no SEO', 'no analytics', 'slow leads'].sort());
+  });
+});
+
+describe('GET /api/calls/:id/apply-to-client/preview', () => {
+  test('returns conflicts with current_source annotation', async () => {
+    db.prepare('UPDATE clients SET brand_profile = ?, brand_profile_sources = ? WHERE id = 1').run(
+      JSON.stringify({ business_name: 'Old', industry: 'Retail' }),
+      JSON.stringify({ business_name: 'call:3', industry: 'manual' }),
+    );
+    const callId = insertCallWithExtraction(db, 1, {
+      profile: { business_name: 'New', industry: 'Different' },
+    });
+    const res = await agent.get(`/api/calls/${callId}/apply-to-client/preview`);
+    expect(res.status).toBe(200);
+    expect(res.body.conflicts).toHaveLength(2);
+    const businessConflict = res.body.conflicts.find((c) => c.path === 'business_name');
+    expect(businessConflict).toEqual({
+      path: 'business_name', current: 'Old', incoming: 'New', current_source: 'call:3',
+    });
+    const industryConflict = res.body.conflicts.find((c) => c.path === 'industry');
+    expect(industryConflict.current_source).toBe('manual');
+  });
+
+  test('returns empty conflicts when nothing differs', async () => {
+    db.prepare('UPDATE clients SET brand_profile = ? WHERE id = 1').run(
+      JSON.stringify({ business_name: 'Acme' }),
+    );
+    const callId = insertCallWithExtraction(db, 1, {
+      profile: { business_name: 'Acme', industry: 'Retail' },  // industry is new (not a conflict)
+    });
+    const res = await agent.get(`/api/calls/${callId}/apply-to-client/preview`);
+    expect(res.status).toBe(200);
+    expect(res.body.conflicts).toEqual([]);
+  });
 });

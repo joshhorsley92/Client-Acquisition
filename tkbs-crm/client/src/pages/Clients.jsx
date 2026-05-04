@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import Modal from '../components/Modal';
+import ImportCsvModal from '../components/ImportCsvModal';
 
 const STATUS_TABS = [
   { key: '', label: 'All' },
@@ -55,6 +56,7 @@ export default function Clients() {
   const [sort, setSort] = useState(SORT_OPTIONS[0]);
   const [showNew, setShowNew] = useState(false);
   const [showFindNew, setShowFindNew] = useState(false);
+  const [showImportCsv, setShowImportCsv] = useState(false);
 
   // Debounce the search box
   useEffect(() => {
@@ -102,6 +104,16 @@ export default function Clients() {
         <h1 style={{ fontSize: 24, margin: 0 }}>Clients</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
+            onClick={() => setShowImportCsv(true)}
+            style={{
+              background: '#fff', color: '#1B2838', border: '1px solid #E2E6EB', borderRadius: 6,
+              padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            }}
+            title="Bulk import clients from a CSV file."
+          >
+            Import CSV
+          </button>
+          <button
             onClick={() => setShowFindNew(true)}
             style={{
               background: '#fff', color: '#1B2838', border: '1px solid #E2E6EB', borderRadius: 6,
@@ -127,6 +139,12 @@ export default function Clients() {
         open={showFindNew}
         onClose={() => setShowFindNew(false)}
         onJobFinished={() => { setShowFindNew(false); load(); }}
+      />
+
+      <ImportCsvModal
+        open={showImportCsv}
+        onClose={() => setShowImportCsv(false)}
+        onCompleted={() => { setShowImportCsv(false); load(); }}
       />
 
       {/* Status tabs */}

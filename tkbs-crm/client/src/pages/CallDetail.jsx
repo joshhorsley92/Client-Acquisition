@@ -68,6 +68,35 @@ export default function CallDetail() {
   const [transcribeError, setTranscribeError] = useState('');
   const [requestingTranscribe, setRequestingTranscribe] = useState(false);
 
+  // Computed flags derived from `call` and `transcript`. Declared up here
+  // (rather than alongside the polling effect) so they're in scope for the
+  // speaker-rename helpers below.
+  const transcribing = call?.transcript_status === 'pending' || call?.transcript_status === 'processing';
+  const hasSpeakerLabels = /\bSpeaker [AB]:/.test(transcript);
+
+  // Speaker rename — only relevant when transcript has Speaker A: / B: markers
+  const [speakerA, setSpeakerA] = useState('');
+  const [speakerB, setSpeakerB] = useState('');
+
+  const renameValid = (name) => name.trim().length > 0 && !name.includes(':');
+  const canApplyRename =
+    hasSpeakerLabels &&
+    !transcribing &&
+    ((renameValid(speakerA) && transcript.includes('Speaker A:')) ||
+     (renameValid(speakerB) && transcript.includes('Speaker B:')));
+
+  const applySpeakerRename = () => {
+    let next = transcript;
+    if (renameValid(speakerA)) next = next.replaceAll('Speaker A:', `${speakerA.trim()}:`);
+    if (renameValid(speakerB)) next = next.replaceAll('Speaker B:', `${speakerB.trim()}:`);
+    if (next !== transcript) {
+      setTranscript(next);
+      setTranscriptDirty(true);
+      setSpeakerA('');
+      setSpeakerB('');
+    }
+  };
+
   // Load call
   useEffect(() => {
     let cancelled = false;
@@ -88,7 +117,7 @@ export default function CallDetail() {
 
   // Poll while Whisper is running. Stops as soon as the row leaves
   // pending/processing or the user starts editing the transcript locally.
-  const transcribing = call?.transcript_status === 'pending' || call?.transcript_status === 'processing';
+  // (`transcribing` is declared above with the other derived flags.)
   useEffect(() => {
     if (!transcribing) return;
     if (transcriptDirty) return;
@@ -268,19 +297,49 @@ export default function CallDetail() {
     }
   };
 
+  // Apply-to-client diff modal state
+  const [conflicts, setConflicts] = useState(null); // null = not previewing, [] = none, [...] = conflicts
+  const [conflictChoices, setConflictChoices] = useState({}); // { path: 'keep'|'take'|'skip' }
+  const [applying, setApplying] = useState(false);
+
   const applyToClient = async () => {
     setProfileError('');
     try {
-      const result = await api.applyCallToClient(id);
-      const applied = result.applied_paths?.length || 0;
-      const skipped = result.skipped_paths?.length || 0;
-      setSavedMessage(
-        `Applied to client — ${applied} field${applied === 1 ? '' : 's'} updated` +
-        (skipped > 0 ? `, ${skipped} manual field${skipped === 1 ? '' : 's'} preserved.` : '.')
-      );
-      setTimeout(() => setSavedMessage(''), 4000);
+      const { conflicts: list } = await api.previewApplyToClient(id);
+      if (!list || list.length === 0) {
+        // No conflicts — apply immediately, no modal needed
+        await commitApply({});
+        return;
+      }
+      // Default each conflict to "take" (the existing behavior). User can override.
+      const defaults = {};
+      for (const c of list) defaults[c.path] = 'take';
+      setConflicts(list);
+      setConflictChoices(defaults);
     } catch (err) {
       setProfileError(err.message || 'Apply failed');
+    }
+  };
+
+  const commitApply = async (choices) => {
+    setApplying(true);
+    try {
+      const result = await api.applyCallToClient(id, { choices });
+      const applied = result.applied_paths?.length || 0;
+      const merged = result.merged_paths?.length || 0;
+      const skipped = result.skipped_paths?.length || 0;
+      const parts = [];
+      if (applied) parts.push(`${applied} updated`);
+      if (merged) parts.push(`${merged} merged`);
+      if (skipped) parts.push(`${skipped} preserved`);
+      setSavedMessage(`Applied to client — ${parts.join(', ') || 'no changes'}.`);
+      setTimeout(() => setSavedMessage(''), 4000);
+      setConflicts(null);
+      setConflictChoices({});
+    } catch (err) {
+      setProfileError(err.message || 'Apply failed');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -379,6 +438,54 @@ export default function CallDetail() {
               padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
             }}>
               {transcribeError}
+            </div>
+          )}
+
+          {hasSpeakerLabels && !transcribing && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+              padding: '8px 10px', background: '#F7F8FA',
+              border: '1px solid #E2E6EB', borderRadius: 4,
+            }}>
+              <span style={{ fontSize: 11, color: '#64748B', fontWeight: 600 }}>Rename:</span>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>A →</span>
+              <input
+                type="text"
+                value={speakerA}
+                onChange={(e) => setSpeakerA(e.target.value)}
+                placeholder="e.g. Josh"
+                style={{
+                  width: 110, padding: '4px 8px', border: '1px solid #E2E6EB',
+                  borderRadius: 4, fontSize: 12,
+                }}
+              />
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>B →</span>
+              <input
+                type="text"
+                value={speakerB}
+                onChange={(e) => setSpeakerB(e.target.value)}
+                placeholder="e.g. Sarah"
+                style={{
+                  width: 110, padding: '4px 8px', border: '1px solid #E2E6EB',
+                  borderRadius: 4, fontSize: 12,
+                }}
+              />
+              <button
+                onClick={applySpeakerRename}
+                disabled={!canApplyRename}
+                title={canApplyRename ? 'Replaces Speaker A:/B: in the transcript with the names you entered.' : 'Enter at least one valid name (no colons).'}
+                style={{
+                  padding: '5px 12px', background: canApplyRename ? '#1B2838' : '#E2E6EB',
+                  color: canApplyRename ? '#fff' : '#94a3b8', border: 'none', borderRadius: 4,
+                  fontSize: 12, fontWeight: 600,
+                  cursor: canApplyRename ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Apply rename
+              </button>
+              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
+                Save transcript to persist
+              </span>
             </div>
           )}
 
@@ -640,16 +747,16 @@ export default function CallDetail() {
                 </button>
                 <button
                   onClick={applyToClient}
-                  disabled={savingProfile || profileDirty}
+                  disabled={savingProfile || profileDirty || applying}
                   style={{
                     padding: '8px 16px', background: '#1B2838', color: '#00D4AA',
                     border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
-                    cursor: (savingProfile || profileDirty) ? 'not-allowed' : 'pointer',
-                    opacity: (savingProfile || profileDirty) ? 0.6 : 1,
+                    cursor: (savingProfile || profileDirty || applying) ? 'not-allowed' : 'pointer',
+                    opacity: (savingProfile || profileDirty || applying) ? 0.6 : 1,
                   }}
                   title={profileDirty ? 'Save your edits first, then apply.' : 'Merge this extraction into the client\u2019s canonical Brand Profile. Manual edits on the client are preserved.'}
                 >
-                  Apply to client
+                  {applying ? 'Applying…' : 'Apply to client'}
                 </button>
               </>
             )}
@@ -708,6 +815,162 @@ export default function CallDetail() {
           </div>
         </div>
       )}
+
+      {/* Apply-to-Client conflict diff modal */}
+      {conflicts && conflicts.length > 0 && (
+        <ConflictDiffModal
+          conflicts={conflicts}
+          choices={conflictChoices}
+          onChoiceChange={(path, val) => setConflictChoices({ ...conflictChoices, [path]: val })}
+          onCancel={() => { setConflicts(null); setConflictChoices({}); }}
+          onConfirm={() => commitApply(conflictChoices)}
+          applying={applying}
+        />
+      )}
     </div>
+  );
+}
+
+// Modal that surfaces every per-path conflict between the client's current
+// Brand Profile and the call's incoming extraction. User picks keep / take /
+// skip per field; choices are POSTed to /apply-to-client.
+function ConflictDiffModal({ conflicts, choices, onChoiceChange, onCancel, onConfirm, applying }) {
+  const labelize = (path) => path.replace(/_/g, ' ').replace(/\./g, ' › ');
+  const renderValue = (v) => {
+    if (v == null) return <span style={{ color: '#94a3b8' }}>—</span>;
+    if (Array.isArray(v)) return <span>{v.join(', ')}</span>;
+    return <span>{String(v)}</span>;
+  };
+  const sourceHint = (src) => {
+    if (!src) return null;
+    if (src === 'manual') return <span style={{ color: '#A16207', fontWeight: 600 }}>your edit</span>;
+    if (src.startsWith('call:')) return <span style={{ color: '#64748B' }}>from call #{src.split(':')[1]}</span>;
+    if (src.startsWith('merged:')) return <span style={{ color: '#64748B' }}>merged from call #{src.split(':')[1]}</span>;
+    return <span style={{ color: '#64748B' }}>{src}</span>;
+  };
+
+  return (
+    <div
+      onClick={applying ? undefined : onCancel}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 8, padding: 24, width: 720,
+          maxHeight: '85vh', overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        }}
+      >
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px 0' }}>
+          Resolve conflicts before applying
+        </h3>
+        <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.5, margin: '0 0 18px 0' }}>
+          {conflicts.length} field{conflicts.length === 1 ? '' : 's'} on this client already
+          {' '}have a value that disagrees with the new extraction. Pick what to do for each.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {conflicts.map((c) => (
+            <div key={c.path} style={{
+              border: '1px solid #E2E6EB', borderRadius: 6, padding: 12,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2838', marginBottom: 8 }}>
+                {labelize(c.path)}
+                {c.current_source && (
+                  <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>
+                    ({sourceHint(c.current_source)})
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+                <div style={{
+                  padding: 8, background: '#F7F8FA', borderRadius: 4,
+                  fontSize: 12, color: '#1B2838',
+                }}>
+                  <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>Current</div>
+                  {renderValue(c.current)}
+                </div>
+                <div style={{
+                  padding: 8, background: '#E6FAF5', borderRadius: 4,
+                  fontSize: 12, color: '#1B2838',
+                }}>
+                  <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>From this call</div>
+                  {renderValue(c.incoming)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <ChoicePill
+                  label="Keep current"
+                  active={choices[c.path] === 'keep'}
+                  onClick={() => onChoiceChange(c.path, 'keep')}
+                  hint="Lock as your edit; future calls won't overwrite"
+                />
+                <ChoicePill
+                  label="Take new"
+                  active={choices[c.path] === 'take'}
+                  onClick={() => onChoiceChange(c.path, 'take')}
+                  hint="Overwrite with the call's value"
+                />
+                <ChoicePill
+                  label="Skip"
+                  active={choices[c.path] === 'skip'}
+                  onClick={() => onChoiceChange(c.path, 'skip')}
+                  hint="Don't change anything for this field"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, gap: 8 }}>
+          <div style={{ fontSize: 11, color: '#64748B' }}>
+            Tip: array fields like pain points always merge — they never conflict.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={onCancel}
+              disabled={applying}
+              style={{
+                padding: '8px 16px', background: '#fff', color: '#1B2838',
+                border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                cursor: applying ? 'not-allowed' : 'pointer', opacity: applying ? 0.6 : 1,
+              }}
+            >Cancel</button>
+            <button
+              onClick={onConfirm}
+              disabled={applying}
+              style={{
+                padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
+                border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
+                cursor: applying ? 'not-allowed' : 'pointer', opacity: applying ? 0.6 : 1,
+              }}
+            >{applying ? 'Applying…' : 'Apply with these choices'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChoicePill({ label, active, onClick, hint }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      style={{
+        padding: '5px 12px', fontSize: 12, fontWeight: 600,
+        borderRadius: 14,
+        border: `1px solid ${active ? '#00D4AA' : '#E2E6EB'}`,
+        background: active ? '#E6FAF5' : '#fff',
+        color: active ? '#047857' : '#64748B',
+        cursor: 'pointer',
+      }}
+    >
+      {active ? '✓ ' : ''}{label}
+    </button>
   );
 }

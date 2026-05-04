@@ -138,6 +138,56 @@ describe('PATCH /api/clients/:id', () => {
     const parsed = JSON.parse(res.body.client.social_links);
     expect(parsed.linkedin).toContain('acme');
   });
+
+  test('PATCH brand_profile auto-tags every changed leaf path as "manual"', async () => {
+    const created = await agent.post('/api/clients').send({ name: 'Acme' });
+    const id = created.body.client.id;
+
+    // Seed a profile with a "call:5" tagged field — simulates a previously
+    // applied call extraction.
+    await agent.patch(`/api/clients/${id}`).send({
+      brand_profile: { business_name: 'Acme', industry: 'Retail' },
+      brand_profile_sources: { business_name: 'call:5', industry: 'call:5' },
+    });
+
+    // Now the user edits business_name in the BrandProfileEditor. Industry
+    // unchanged. After the PATCH, business_name should flip to 'manual'.
+    const res = await agent.patch(`/api/clients/${id}`).send({
+      brand_profile: { business_name: 'Acme Boutique', industry: 'Retail' },
+    });
+    expect(res.status).toBe(200);
+    const sources = JSON.parse(res.body.client.brand_profile_sources);
+    expect(sources.business_name).toBe('manual');
+    expect(sources.industry).toBe('call:5');
+  });
+
+  test('PATCH brand_profile tags newly-added paths as "manual"', async () => {
+    const created = await agent.post('/api/clients').send({ name: 'Acme' });
+    const id = created.body.client.id;
+
+    const res = await agent.patch(`/api/clients/${id}`).send({
+      brand_profile: { business_name: 'Acme', tagline: 'Built for you.' },
+    });
+    expect(res.status).toBe(200);
+    const sources = JSON.parse(res.body.client.brand_profile_sources);
+    expect(sources.business_name).toBe('manual');
+    expect(sources.tagline).toBe('manual');
+  });
+
+  test('PATCH brand_profile + sources together: caller-supplied sources are trusted verbatim', async () => {
+    // This is the contract used by the apply-to-client diff modal — when the
+    // caller passes sources explicitly, no auto-tagging happens.
+    const created = await agent.post('/api/clients').send({ name: 'Acme' });
+    const id = created.body.client.id;
+
+    const res = await agent.patch(`/api/clients/${id}`).send({
+      brand_profile: { business_name: 'Acme' },
+      brand_profile_sources: { business_name: 'call:9' },
+    });
+    expect(res.status).toBe(200);
+    const sources = JSON.parse(res.body.client.brand_profile_sources);
+    expect(sources.business_name).toBe('call:9');
+  });
 });
 
 describe('DELETE /api/clients/:id', () => {

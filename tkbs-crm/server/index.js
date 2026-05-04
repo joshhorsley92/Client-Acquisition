@@ -71,6 +71,7 @@ function createApp(testDb) {
   app.use('/api/activities', require('./routes/activities'));
   app.use('/api/calls', require('./routes/calls'));
   app.use('/api/scrape-jobs', require('./routes/scrape-jobs'));
+  app.use('/api/import-clients', require('./routes/import-clients'));
   app.use('/api/scripts', require('./routes/scripts'));
   app.use('/api/automations', require('./routes/automations'));
   app.use('/api/settings', require('./routes/settings'));

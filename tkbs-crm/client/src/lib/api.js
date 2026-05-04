@@ -88,13 +88,26 @@ export const api = {
   updateCall: (id, body) => request(`/calls/${id}`, { method: 'PATCH', body }),
   deleteCall: (id) => request(`/calls/${id}`, { method: 'DELETE' }),
   extractBrandProfile: (id) => request(`/calls/${id}/extract-brand-profile`, { method: 'POST' }),
-  applyCallToClient: (id) => request(`/calls/${id}/apply-to-client`, { method: 'POST' }),
+  applyCallToClient: (id, body) => request(`/calls/${id}/apply-to-client`, { method: 'POST', body: body || {} }),
+  previewApplyToClient: (id) => request(`/calls/${id}/apply-to-client/preview`),
   transcribeCall: (id) => request(`/calls/${id}/transcribe`, { method: 'POST' }),
 
   // Lead-acquisition pipeline jobs
   listScrapeJobs: () => request('/scrape-jobs'),
   getScrapeJob: (id) => request(`/scrape-jobs/${id}`),
   startScrapeJob: (params) => request('/scrape-jobs', { method: 'POST', body: params }),
+
+  // CSV import — multipart upload, mirrors createCall's pattern
+  importClientsCsv: async (formData) => {
+    const res = await fetch('/api/import-clients', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Import failed (${res.status})`);
+    return data;
+  },
   // Multipart create — FormData, not JSON.
   createCall: async (formData) => {
     const res = await fetch(`/api/calls`, {

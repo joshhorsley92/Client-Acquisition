@@ -144,7 +144,10 @@ router.patch('/:id', (req, res) => {
     'primary_contact_name', 'email', 'phone', 'role', 'preferred_contact',
     'notes', 'owner_id', 'enrichment_status',
   ];
-  const jsonFields = ['additional_contacts', 'social_links', 'enrichment_data', 'brand_profile', 'brand_profile_sources'];
+  // brand_profile is handled separately so we can auto-tag changed paths as
+  // 'manual' in brand_profile_sources — protects user edits from being
+  // silently overwritten by a future call's apply-to-client.
+  const jsonFields = ['additional_contacts', 'social_links', 'enrichment_data'];
 
   const updates = [];
   const values = [];
@@ -160,6 +163,45 @@ router.patch('/:id', (req, res) => {
       updates.push(`${field} = ?`);
       values.push(typeof req.body[field] === 'string' ? req.body[field] : JSON.stringify(req.body[field]));
     }
+  }
+
+  // Handle brand_profile + sources together so manual edits get tagged.
+  if (req.body.brand_profile !== undefined) {
+    const { diffChangedPaths } = require('../services/brand-profile-merge');
+    const newProfile = typeof req.body.brand_profile === 'string'
+      ? JSON.parse(req.body.brand_profile || '{}')
+      : (req.body.brand_profile || {});
+
+    let nextSources;
+    if (req.body.brand_profile_sources !== undefined) {
+      // Caller explicitly provided sources — trust them verbatim. This is
+      // the path used by the diff modal when applying user choices.
+      nextSources = typeof req.body.brand_profile_sources === 'string'
+        ? JSON.parse(req.body.brand_profile_sources || '{}')
+        : (req.body.brand_profile_sources || {});
+    } else {
+      // Caller only updated the profile — auto-tag changed leaves as 'manual'
+      // so they survive future call apply-to-client merges. This is the path
+      // used by the BrandProfileEditor when the user types and saves.
+      let oldProfile = {};
+      try { oldProfile = JSON.parse(existing.brand_profile || '{}'); } catch (e) {}
+      try { nextSources = JSON.parse(existing.brand_profile_sources || '{}'); } catch (e) { nextSources = {}; }
+      const changed = diffChangedPaths(oldProfile, newProfile);
+      for (const path of changed) {
+        nextSources[path] = 'manual';
+      }
+    }
+
+    updates.push('brand_profile = ?');
+    values.push(JSON.stringify(newProfile));
+    updates.push('brand_profile_sources = ?');
+    values.push(JSON.stringify(nextSources));
+  } else if (req.body.brand_profile_sources !== undefined) {
+    // sources updated alone (e.g., from the diff modal applying user choices)
+    updates.push('brand_profile_sources = ?');
+    values.push(typeof req.body.brand_profile_sources === 'string'
+      ? req.body.brand_profile_sources
+      : JSON.stringify(req.body.brand_profile_sources));
   }
 
   if (updates.length === 0) {

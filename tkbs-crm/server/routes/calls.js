@@ -287,8 +287,44 @@ router.post('/:id/extract-brand-profile', async (req, res) => {
   }
 });
 
+// Preview the conflicts that would surface if this call's extraction were
+// applied to the client right now. Used by the diff modal — non-destructive.
+// Returns: { conflicts: [{ path, current, incoming }], current_sources: {...} }
+router.get('/:id/apply-to-client/preview', (req, res) => {
+  const { computeBrandProfileDiff } = require('../services/brand-profile-merge');
+
+  const call = req.db.prepare('SELECT * FROM call_recordings WHERE id = ?').get(req.params.id);
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!call.extracted_profile_json) {
+    return res.status(400).json({ error: 'No extracted Brand Profile to apply — run Extract first.' });
+  }
+
+  let extraction;
+  try { extraction = JSON.parse(call.extracted_profile_json); } catch (e) {
+    return res.status(400).json({ error: 'Extracted profile JSON is malformed' });
+  }
+  if (!extraction.profile) return res.status(400).json({ error: 'Extracted profile is empty' });
+
+  const client = req.db.prepare('SELECT brand_profile, brand_profile_sources FROM clients WHERE id = ?').get(call.client_id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  let currentProfile = {};
+  let currentSources = {};
+  try { currentProfile = JSON.parse(client.brand_profile || '{}'); } catch (e) {}
+  try { currentSources = JSON.parse(client.brand_profile_sources || '{}'); } catch (e) {}
+
+  const conflicts = computeBrandProfileDiff(currentProfile, extraction.profile);
+  // Annotate each conflict with the current path's source tag so the UI
+  // can hint "this came from call:3" or "you edited this manually".
+  for (const c of conflicts) {
+    c.current_source = currentSources[c.path] || null;
+  }
+  res.json({ conflicts });
+});
+
 // Merge this call's extracted profile into the client's canonical brand
 // profile, respecting any field paths the user has tagged "manual".
+// Optional body: { choices: { "path": "keep" | "take" | "skip" } }
 router.post('/:id/apply-to-client', (req, res) => {
   const { mergeExtractionIntoClient } = require('../services/brand-profile-merge');
 
@@ -314,8 +350,20 @@ router.post('/:id/apply-to-client', (req, res) => {
   try { currentProfile = JSON.parse(client.brand_profile || '{}'); } catch (e) {}
   try { currentSources = JSON.parse(client.brand_profile_sources || '{}'); } catch (e) {}
 
+  // Optional per-path resolutions from the conflict diff modal:
+  //   { choices: { "business_name": "keep", "industry": "take", ... } }
+  // Valid values: 'keep' | 'take' | 'skip'. Unspecified paths use defaults.
+  const choices = {};
+  if (req.body && req.body.choices && typeof req.body.choices === 'object') {
+    for (const [path, val] of Object.entries(req.body.choices)) {
+      if (val === 'keep' || val === 'take' || val === 'skip') {
+        choices[path] = val;
+      }
+    }
+  }
+
   const merged = mergeExtractionIntoClient(
-    currentProfile, currentSources, extraction.profile, call.id,
+    currentProfile, currentSources, extraction.profile, call.id, { choices },
   );
 
   req.db.prepare(
@@ -335,8 +383,14 @@ router.post('/:id/apply-to-client', (req, res) => {
     ).run(
       client.id,
       call.engagement_id || null,
-      `Applied call #${call.id} brand profile to client — ${merged.appliedPaths.length} fields updated, ${merged.skippedPaths.length} manual fields preserved.`,
-      JSON.stringify({ call_id: call.id, applied: merged.appliedPaths, skipped: merged.skippedPaths }),
+      `Applied call #${call.id} brand profile to client — ${merged.appliedPaths.length} updated, ${merged.mergedPaths.length} merged (arrays), ${merged.skippedPaths.length} preserved.`,
+      JSON.stringify({
+        call_id: call.id,
+        applied: merged.appliedPaths,
+        merged: merged.mergedPaths,
+        skipped: merged.skippedPaths,
+        choices: Object.keys(choices).length ? choices : undefined,
+      }),
       req.user?.id || null,
     );
   } catch (e) { /* best-effort */ }
@@ -345,12 +399,15 @@ router.post('/:id/apply-to-client', (req, res) => {
     req.audit('brand_profile_applied_to_client', 'client', client.id, {
       call_id: call.id,
       applied_count: merged.appliedPaths.length,
+      merged_count: merged.mergedPaths.length,
       skipped_count: merged.skippedPaths.length,
+      choice_count: Object.keys(choices).length,
     });
   } catch (e) {}
 
   res.json({
     applied_paths: merged.appliedPaths,
+    merged_paths: merged.mergedPaths,
     skipped_paths: merged.skippedPaths,
     profile: merged.profile,
     sources: merged.sources,
