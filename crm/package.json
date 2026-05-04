@@ -1,0 +1,36 @@
+{
+  "name": "tkbs-crm",
+  "version": "1.0.0-pre",
+  "private": true,
+  "description": "TKBS CRM v1.0 — Next.js + Supabase, mirrors the Dashboard stack",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "seed-users": "node supabase/seed-users.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@supabase/ssr": "^0.1.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "csv-parse": "^6.2.1",
+    "next": "^16.2.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.3.0",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "14.2.18",
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.0"
+  }
+}
