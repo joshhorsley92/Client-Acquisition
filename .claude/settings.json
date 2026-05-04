@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npx jest)",
+      "Bash(npx jest --silent)",
+      "Bash(tasklist)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
