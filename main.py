@@ -2,13 +2,14 @@ import logging
 import click
 from config import load_config
 from database.supabase_client import Database
-from scrapers.etsy import EtsyScraper
-from scrapers.kickstarter import KickstarterScraper
-from scrapers.county_registry import CountyRegistryScraper
-from enrichment.pipeline import EnrichmentPipeline
-from outreach.generator import OutreachGenerator
 from database.migrate import run_migration
 from database.crm_bridge import push_leads_to_crm
+
+# Heavier deps (Etsy/Kickstarter scrapers, OutreachGenerator with python-docx
+# + Pillow + Jinja2) are lazy-imported inside each command so the CRM-side
+# subprocess pipeline (`scrape county` -> `enrich` -> `push`) doesn't drag
+# them in. Outreach is owned by the CRM UI in v2; those packages are no
+# longer required for the bridge to work.
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -31,11 +32,16 @@ def cli():
 def scrape(source, real, visible):
     """Scrape leads from a source (etsy, kickstarter, county, or all)."""
     db = get_db()
+    from scrapers.county_registry import CountyRegistryScraper
     scrapers = {
-        "etsy": lambda: EtsyScraper(db=db),
-        "kickstarter": lambda: KickstarterScraper(db=db),
         "county": lambda: CountyRegistryScraper(db=db),
     }
+    if source in ("etsy", "all"):
+        from scrapers.etsy import EtsyScraper
+        scrapers["etsy"] = lambda: EtsyScraper(db=db)
+    if source in ("kickstarter", "all"):
+        from scrapers.kickstarter import KickstarterScraper
+        scrapers["kickstarter"] = lambda: KickstarterScraper(db=db)
 
     if real:
         headless = not visible
@@ -63,6 +69,7 @@ def scrape(source, real, visible):
 def enrich(lead_id):
     """Enrich leads with contact info and marketing signals."""
     db = get_db()
+    from enrichment.pipeline import EnrichmentPipeline
     pipeline = EnrichmentPipeline(db=db)
     if lead_id:
         click.echo(f"Enriching lead {lead_id}...")
@@ -82,6 +89,7 @@ def generate(status, lead_id, fmt, send):
     """Generate personalized outreach documents."""
     db = get_db()
     config = load_config()
+    from outreach.generator import OutreachGenerator
     gen = OutreachGenerator(db=db, base_url=config["tkbs_base_url"])
     if lead_id:
         click.echo(f"Generating {fmt} for lead {lead_id}...")

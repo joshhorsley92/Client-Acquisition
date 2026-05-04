@@ -72,9 +72,11 @@ function runStep(db, jobId, label, args, env) {
   return new Promise((resolve, reject) => {
     appendLog(db, jobId, `\n[runner] ${nowIso()}  step: ${label}\n[runner] ${PYTHON_BIN} ${args.join(' ')}\n`);
 
+    // PYTHONUNBUFFERED forces Python to flush stdout/stderr after every
+    // print so the UI sees progress live instead of one big dump on exit.
     const proc = spawn(PYTHON_BIN, args, {
       cwd: REPO_ROOT,
-      env,
+      env: { ...env, PYTHONUNBUFFERED: '1' },
       windowsHide: true,
     });
 
