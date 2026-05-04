@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
@@ -8,7 +8,7 @@ import { cookies } from 'next/headers';
 const CRM_SCHEMA = 'crm';
 
 // Server-side Supabase client (user-scoped, subject to RLS). Use in API
-// route handlers and Server Components. Reads/writes the auth cookie via
+// route handlers and Server Components. Reads/writes the auth cookies via
 // Next.js's cookies() helper. Async because Next 15+ made cookies() async.
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
@@ -19,21 +19,18 @@ export async function createServerSupabaseClient() {
     {
       db: { schema: CRM_SCHEMA },
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(cookiesToSet) {
           try {
-            cookieStore.set({ name, value, ...options });
+            for (const { name, value, options } of cookiesToSet) {
+              cookieStore.set({ name, value, ...options });
+            }
           } catch {
             // Server Components can't set cookies — ignore silently.
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options });
-          } catch {
-            /* same as above */
+            // Middleware refreshes the session cookie before the request
+            // reaches the Server Component, so this is fine.
           }
         },
       },

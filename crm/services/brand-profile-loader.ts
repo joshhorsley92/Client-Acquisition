@@ -10,7 +10,12 @@
 // Returns { profile, source } or null. `source` carries provenance metadata
 // so the UI / activity log can hint where the profile came from.
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Loose Supabase shape — the schema-narrowed client from supabase-server
+// has a different generic signature than the default that SupabaseClient
+// is typed against, so we accept any here.
+type SupabaseLike = {
+  from: (table: string) => any;
+};
 
 export interface LoadedBrandProfile {
   profile: Record<string, unknown>;
@@ -38,7 +43,7 @@ function isMeaningful(obj: unknown): boolean {
 }
 
 export async function getLatestBrandProfile(
-  supabase: SupabaseClient,
+  supabase: SupabaseLike,
   clientId: number | string,
 ): Promise<LoadedBrandProfile | null> {
   // 1. Client-level canonical profile.

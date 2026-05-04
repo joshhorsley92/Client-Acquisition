@@ -39,7 +39,7 @@ function LoginContents() {
   useEffect(() => {
     // Subscribe to auth events. PASSWORD_RECOVERY fires after the SDK
     // processes a recovery hash on page load.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event: string, session: unknown) => {
       if (event === 'PASSWORD_RECOVERY') {
         setMode('recovery');
         return;

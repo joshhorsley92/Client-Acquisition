@@ -9,7 +9,11 @@
 //     for any signals the CSV import or future enrichment service stores there.
 //   - All SQLite reads/writes replaced with Supabase client calls.
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Schema-specific Supabase client. The `crm` narrowing from supabase-server's
+// db.schema option doesn't match the default type, so we accept any here.
+type SupabaseLike = {
+  from: (table: string) => any;
+};
 
 const US_STATES = new Set([
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -193,7 +197,7 @@ function scoreReadiness(signals: any, max: number) {
   return { score: Math.min(max, raw), details };
 }
 
-async function scoreEngagement(supabase: SupabaseClient, clientId: number | string, max: number) {
+async function scoreEngagement(supabase: SupabaseLike, clientId: number | string, max: number) {
   const { count } = await supabase
     .from('activities').select('*', { count: 'exact', head: true }).eq('client_id', clientId);
   const n = Number(count) || 0;
@@ -205,7 +209,7 @@ async function scoreEngagement(supabase: SupabaseClient, clientId: number | stri
   return { score, details: { activity_count: n, bucket } };
 }
 
-async function loadIcp(supabase: SupabaseClient): Promise<any> {
+async function loadIcp(supabase: SupabaseLike): Promise<any> {
   const { data } = await supabase
     .from('integration_settings').select('config').eq('type', 'icp_config').maybeSingle();
   return { ...DEFAULT_ICP, ...(data?.config || {}) };
@@ -218,7 +222,7 @@ export interface FitScoreResult {
 }
 
 export async function scoreClient(
-  supabase: SupabaseClient,
+  supabase: SupabaseLike,
   clientId: number | string,
 ): Promise<FitScoreResult> {
   const { data: client, error } = await supabase
@@ -235,7 +239,7 @@ export async function scoreClient(
   const { data: engagements } = await supabase
     .from('engagements').select('notes, source_detail').eq('client_id', clientId);
   const engagementBlob = (engagements || [])
-    .map((e) => [e.notes, e.source_detail].filter(Boolean).join(' '))
+    .map((e: any) => [e.notes, e.source_detail].filter(Boolean).join(' '))
     .filter(Boolean).join(' \n ');
   const textBlob = [client.notes, engagementBlob].filter(Boolean).join(' \n ');
 

@@ -20,7 +20,10 @@
 -- =========================================================================
 
 CREATE SCHEMA IF NOT EXISTS crm;
-GRANT USAGE ON SCHEMA crm TO authenticated, service_role, anon;
+-- Supabase requires grants to ALL of these roles for the schema to be
+-- selectable in the Data API "Exposed schemas" dropdown. RLS still gates
+-- per-row access, so anon/authenticated grants here are safe.
+GRANT USAGE ON SCHEMA crm TO postgres, anon, authenticated, service_role;
 
 -- Auto-touches updated_at on UPDATE. One trigger per table that has it.
 CREATE OR REPLACE FUNCTION crm.touch_updated_at()
@@ -416,15 +419,17 @@ CREATE POLICY crm_recordings_member_delete
   );
 
 -- =========================================================================
--- Schema permissions — let authenticated users see and use everything
--- in the crm schema. RLS still gates per-row access.
+-- Schema permissions — required by Supabase for the schema to appear in the
+-- Data API "Exposed schemas" dropdown. RLS still gates per-row access.
 -- =========================================================================
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA crm TO authenticated;
-GRANT USAGE,  SELECT                  ON ALL SEQUENCES IN SCHEMA crm TO authenticated;
-GRANT EXECUTE                          ON ALL FUNCTIONS IN SCHEMA crm TO authenticated;
+GRANT ALL ON ALL TABLES    IN SCHEMA crm TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA crm TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA crm TO postgres, anon, authenticated, service_role;
 
 -- Defaults so new objects (added in future migrations) get the same grants.
 ALTER DEFAULT PRIVILEGES IN SCHEMA crm
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+  GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA crm
-  GRANT USAGE, SELECT ON SEQUENCES TO authenticated;
+  GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm
+  GRANT ALL ON FUNCTIONS TO postgres, anon, authenticated, service_role;
