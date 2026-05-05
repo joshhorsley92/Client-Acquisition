@@ -347,17 +347,22 @@ ALTER TABLE crm.outbound_webhooks      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crm.sms_messages           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crm.audit_log              ENABLE ROW LEVEL SECURITY;
 
--- Profiles: users can read all profiles (so we can show "owned by Joe" etc.),
--- but only update their own. Admins can do anything.
+-- Profiles: any authenticated user can read all profiles (so we can show
+-- "owned by Joe" etc.), but only update their own. Admin promotion is done
+-- via the service-role client (seed-users.mjs) so we don't need a recursive
+-- RLS check here. Two-person internal CRM — no fine-grained read perms needed.
+--
+-- IMPORTANT: do NOT make this policy a self-referential subquery on
+-- crm.profiles (e.g. `EXISTS (SELECT 1 FROM crm.profiles WHERE id = auth.uid())`).
+-- That breaks because the subquery is itself RLS-gated, returning nothing,
+-- and the outer query returns nothing — locking everyone out.
 CREATE POLICY profiles_read_all ON crm.profiles
   FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM crm.profiles WHERE id = auth.uid()));
-CREATE POLICY profiles_update_own_or_admin ON crm.profiles
+  USING (true);
+CREATE POLICY profiles_update_own ON crm.profiles
   FOR UPDATE TO authenticated
-  USING (
-    id = auth.uid()
-    OR EXISTS (SELECT 1 FROM crm.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
 
 -- Generic full-access policy applied to every domain table.
 DO $$
