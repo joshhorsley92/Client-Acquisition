@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
 
 const TEXT_COLUMNS = [
   'name', 'website', 'industry', 'location', 'type',
@@ -150,6 +151,20 @@ export async function POST(req: NextRequest) {
   const { data: clients } = imported.length
     ? await supabase.from('clients').select('*').in('id', imported)
     : { data: [] as any[] };
+
+  await audit({
+    userId: auth.userId,
+    action: 'import_csv',
+    resourceType: 'client',
+    metadata: {
+      imported: imported.length,
+      skipped: skippedReasons.length,
+      errors: errors.length,
+      total_rows: rows.length,
+      filename: (file as File).name || null,
+    },
+    request: req,
+  });
 
   return NextResponse.json({
     imported: imported.length,

@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
@@ -30,7 +31,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
   const { id } = await ctx.params;
   const body = await req.json();
 
@@ -54,23 +55,43 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { data, error } = await supabase
     .from('call_recordings').update(updates).eq('id', id).select('*').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'update',
+    resourceType: 'call',
+    resourceId: id,
+    metadata: { fields: Object.keys(updates) },
+    request: req,
+  });
+
   return NextResponse.json({ call: data });
 }
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
   const { id } = await ctx.params;
 
   // Fetch the audio path so we can clean up Storage too.
   const { data: existing } = await supabase
-    .from('call_recordings').select('audio_storage_path').eq('id', id).single();
+    .from('call_recordings').select('audio_storage_path, client_id').eq('id', id).single();
   if (existing?.audio_storage_path) {
     await supabase.storage.from('crm-call-recordings').remove([existing.audio_storage_path]);
   }
 
   const { error } = await supabase.from('call_recordings').delete().eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'delete',
+    resourceType: 'call',
+    resourceId: id,
+    metadata: existing ? { client_id: existing.client_id } : {},
+    request: req,
+  });
+
   return NextResponse.json({ ok: true });
 }

@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
 
 const ICP_TYPE = 'icp_config';
 
@@ -49,7 +50,7 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const result = await requireAdminAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
 
   const icp = await req.json().catch(() => null);
   if (!icp || typeof icp !== 'object') {
@@ -75,5 +76,19 @@ export async function PUT(req: NextRequest) {
     .from('integration_settings')
     .upsert({ type: ICP_TYPE, config: icp, enabled: true }, { onConflict: 'type' });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'update_icp',
+    resourceType: 'icp_config',
+    metadata: {
+      target_industries_included: icp.target_industries?.included?.length,
+      target_industries_excluded: icp.target_industries?.excluded?.length,
+      revenue_min: icp.revenue_range?.min_usd,
+      revenue_max: icp.revenue_range?.max_usd,
+    },
+    request: req,
+  });
+
   return NextResponse.json(icp);
 }

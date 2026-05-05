@@ -5,11 +5,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
 import { extractBrandProfile, computeCompletion, NoApiKeyError } from '@/services/brand-profile-extractor';
+import { audit } from '@/lib/audit';
 
-export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
   const { id } = await ctx.params;
 
   const { data: call, error: callErr } = await supabase
@@ -41,6 +42,19 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       extracted_profile_json: payload,
       review_status: 'pending',
     }).eq('id', id);
+
+    await audit({
+      userId: auth.userId,
+      action: 'extract_brand_profile',
+      resourceType: 'call',
+      resourceId: id,
+      metadata: {
+        completion_percent: payload.completion_percent,
+        duration_ms: ms,
+        client_id: call.client_id,
+      },
+      request: req,
+    });
 
     return NextResponse.json({ extraction: payload });
   } catch (err) {

@@ -4,6 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
+import { EngagementCreateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
   const result = await requireAuth();
@@ -33,14 +35,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ engagements });
 }
 
-const CreateBody = z.object({
-  client_id: z.union([z.number(), z.string()]),
-  status: z.enum(['new', 'working', 'won', 'lost']).optional(),
-  package_type: z.enum(['boost', 'launch', 'both', 'undecided']).nullish(),
-  source: z.enum(['referral', 'cold', 'web', 'content', 'paid_ads']).nullish(),
-  source_detail: z.string().nullish(),
-  estimated_value: z.number().optional(),
-  notes: z.string().nullish(),
+const ServerEngagementCreate = EngagementCreateSchema.extend({
+  // owner_id is server-only — admins can override which user owns a new engagement
   owner_id: z.string().nullish(),
 });
 
@@ -50,7 +46,7 @@ export async function POST(req: NextRequest) {
   const { auth, supabase } = result;
 
   let body;
-  try { body = CreateBody.parse(await req.json()); }
+  try { body = ServerEngagementCreate.parse(await req.json()); }
   catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid body' }, { status: 400 });
   }
@@ -74,6 +70,15 @@ export async function POST(req: NextRequest) {
     .select('*')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'create',
+    resourceType: 'engagement',
+    resourceId: data.id,
+    metadata: { client_id: body.client_id, status: data.status, source: data.source },
+    request: req,
+  });
 
   // TODO Phase D-iter-2: executeStatusActions (Slack notification on status entry)
   return NextResponse.json({ engagement: data }, { status: 201 });

@@ -8,15 +8,13 @@ import Sidebar from '@/components/Sidebar';
 
 export default async function AuthedLayout({ children }: { children: React.ReactNode }) {
   const result = await requireAuth();
-  // Middleware should have redirected unauth'd users to /login already.
-  // This is defense-in-depth; we render nothing rather than crash.
   if (isAuthError(result)) return null;
   const { auth } = result;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="flex min-h-screen">
       <Sidebar user={{ name: auth.name, role: auth.role }} />
-      <main style={{ flex: 1, padding: 24, overflow: 'auto' }}>
+      <main className="flex-1 p-6 overflow-auto">
         {children}
       </main>
     </div>

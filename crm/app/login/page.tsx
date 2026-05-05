@@ -13,6 +13,9 @@
 import { Suspense, useEffect, useState, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
+import { humanizeError } from '@/lib/humanize-error';
+import { ErrorBox } from '@/components/ui/Forms';
+import { Spinner } from '@/components/Skeleton';
 
 export default function LoginPage() {
   return (
@@ -29,29 +32,19 @@ function LoginContents() {
   const expired = params.get('expired') === '1';
 
   const supabase = createClient();
-
-  // Mode detection: when the user clicks a recovery link, Supabase puts
-  // `#access_token=...&type=recovery&refresh_token=...` in the URL hash and
-  // the browser SDK auto-establishes a recovery session. We swap to the
-  // "set new password" form when that happens.
   const [mode, setMode] = useState<'signin' | 'recovery' | 'detecting'>('detecting');
 
   useEffect(() => {
-    // Subscribe to auth events. PASSWORD_RECOVERY fires after the SDK
-    // processes a recovery hash on page load.
     const { data: sub } = supabase.auth.onAuthStateChange((event: string, session: unknown) => {
       if (event === 'PASSWORD_RECOVERY') {
         setMode('recovery');
         return;
       }
       if (event === 'SIGNED_IN' && session && mode !== 'recovery') {
-        // Already signed in (cookie persisted) — bounce to home.
         router.push(redirect);
       }
     });
 
-    // Initial check: hash includes type=recovery means recovery flow even
-    // before the SDK fires its event.
     if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
       setMode('recovery');
     } else {
@@ -63,7 +56,13 @@ function LoginContents() {
   }, []);
 
   if (mode === 'detecting') {
-    return <CenteredCard><p style={{ fontSize: 13, color: '#64748B' }}>Loading…</p></CenteredCard>;
+    return (
+      <CenteredCard>
+        <div className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Spinner /> Loading…
+        </div>
+      </CenteredCard>
+    );
   }
 
   return (
@@ -83,14 +82,9 @@ function LoginContents() {
 
 function CenteredCard({ children }: { children: React.ReactNode }) {
   return (
-    <main style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: 8, padding: 32, width: 380,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid #E2E6EB',
-      }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>TKBS CRM</h1>
+    <main className="min-h-screen flex items-center justify-center p-6">
+      <div className="bg-surface rounded-lg p-8 w-[380px] shadow-card border border-edge">
+        <h1 className="text-[22px] font-bold mb-1 text-ink">TKBS CRM</h1>
         {children}
       </div>
     </main>
@@ -110,32 +104,35 @@ function SignInForm({
     setError(''); setSubmitting(true);
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
-    if (authError) { setError(authError.message); return; }
+    if (authError) { setError(humanizeError(authError)); return; }
     onSuccess();
   }
 
+  const labelClass = 'block text-xs text-ink-muted mb-1 mt-3';
+  const inputClass = 'w-full px-2.5 py-2 border border-edge rounded text-[13px] bg-surface focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none';
+
   return (
     <>
-      <p style={subtitleStyle}>Sign in to continue.</p>
-      {expired && <div style={errorStyle}>Your session expired. Please sign in again.</div>}
-      {error && <div style={errorStyle}>{error}</div>}
+      <p className="text-[13px] text-ink-muted mb-5">Sign in to continue.</p>
+      {expired && <ErrorBox>Your session expired. Please sign in again.</ErrorBox>}
+      {error && <ErrorBox>{error}</ErrorBox>}
       <form onSubmit={onSubmit}>
-        <label style={labelStyle}>Email</label>
+        <label className={labelClass}>Email</label>
         <input
           type="email" autoComplete="email" required
           value={email} onChange={(e) => setEmail(e.target.value)}
-          style={inputStyle}
+          className={inputClass}
         />
-        <label style={labelStyle}>Password</label>
+        <label className={labelClass}>Password</label>
         <input
           type="password" autoComplete="current-password" required
           value={password} onChange={(e) => setPassword(e.target.value)}
-          style={inputStyle}
+          className={inputClass}
         />
         <button
           type="submit"
           disabled={submitting || !email || !password}
-          style={primaryBtn(submitting || !email || !password)}
+          className="w-full mt-4 px-4 py-2.5 bg-brand-mint text-brand-charcoal border-none rounded text-sm font-semibold cursor-pointer hover:bg-brand-mint-dark disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-brand-mint"
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
@@ -158,31 +155,34 @@ function SetPasswordForm({ onDone }: { onDone: () => void }) {
     setError(''); setSubmitting(true);
     const { error: updErr } = await supabase.auth.updateUser({ password });
     setSubmitting(false);
-    if (updErr) { setError(updErr.message); return; }
+    if (updErr) { setError(humanizeError(updErr)); return; }
     onDone();
   }
 
+  const labelClass = 'block text-xs text-ink-muted mb-1 mt-3';
+  const inputClass = 'w-full px-2.5 py-2 border border-edge rounded text-[13px] bg-surface focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none';
+
   return (
     <>
-      <p style={subtitleStyle}>Set a new password to finish signing in.</p>
-      {error && <div style={errorStyle}>{error}</div>}
+      <p className="text-[13px] text-ink-muted mb-5">Set a new password to finish signing in.</p>
+      {error && <ErrorBox>{error}</ErrorBox>}
       <form onSubmit={onSubmit}>
-        <label style={labelStyle}>New password</label>
+        <label className={labelClass}>New password</label>
         <input
           type="password" autoComplete="new-password" required minLength={8}
           value={password} onChange={(e) => setPassword(e.target.value)}
-          style={inputStyle}
+          className={inputClass}
         />
-        <label style={labelStyle}>Confirm new password</label>
+        <label className={labelClass}>Confirm new password</label>
         <input
           type="password" autoComplete="new-password" required minLength={8}
           value={confirm} onChange={(e) => setConfirm(e.target.value)}
-          style={inputStyle}
+          className={inputClass}
         />
         <button
           type="submit"
           disabled={submitting || password.length < 8 || password !== confirm}
-          style={primaryBtn(submitting || password.length < 8 || password !== confirm)}
+          className="w-full mt-4 px-4 py-2.5 bg-brand-mint text-brand-charcoal border-none rounded text-sm font-semibold cursor-pointer hover:bg-brand-mint-dark disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-brand-mint"
         >
           {submitting ? 'Saving…' : 'Set password and continue'}
         </button>
@@ -190,23 +190,3 @@ function SetPasswordForm({ onDone }: { onDone: () => void }) {
     </>
   );
 }
-
-const subtitleStyle: React.CSSProperties = { fontSize: 13, color: '#64748B', marginBottom: 20 };
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 12, color: '#64748B', marginBottom: 4, marginTop: 12,
-};
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
-  borderRadius: 4, fontSize: 13,
-};
-const errorStyle: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
-};
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  width: '100%', marginTop: 16, padding: '10px 16px',
-  background: '#00D4AA', color: '#1B2838', border: 'none',
-  borderRadius: 4, fontSize: 14, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  opacity: disabled ? 0.6 : 1,
-});

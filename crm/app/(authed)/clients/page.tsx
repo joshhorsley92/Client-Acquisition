@@ -5,12 +5,18 @@
 // score). + New Client button opens NewClientModal; Import CSV button
 // opens ImportCsvModal.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { StickyNote } from 'lucide-react';
 import { api } from '@/lib/api';
 import NewClientModal from '@/components/NewClientModal';
 import ImportCsvModal from '@/components/ImportCsvModal';
+import QuickNoteModal from '@/components/QuickNoteModal';
 import EnrichmentBadge from '@/components/EnrichmentBadge';
+import { ErrorBox, PrimaryButton, SecondaryButton } from '@/components/ui/Forms';
+import { Spinner } from '@/components/Skeleton';
+import { humanizeError } from '@/lib/humanize-error';
+import { cn } from '@/lib/cn';
 
 const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: '', label: 'All' },
@@ -21,10 +27,12 @@ const STATUS_TABS: Array<{ key: string; label: string }> = [
 ];
 
 const SORT_OPTIONS = [
+  // Default: fit score descending. The whole product story is "fit informs
+  // decisions" — the list should show high-fit prospects first.
+  { key: 'fit_score', label: 'Fit score', dir: 'desc' },
   { key: 'lifetime_revenue', label: 'Lifetime revenue', dir: 'desc' },
   { key: 'last_activity_at', label: 'Last activity', dir: 'desc' },
   { key: 'name', label: 'Name', dir: 'asc' },
-  { key: 'fit_score', label: 'Fit score', dir: 'desc' },
   { key: 'created_at', label: 'Recently added', dir: 'desc' },
 ] as const;
 
@@ -61,15 +69,21 @@ export default function ClientsPage() {
   const [status, setStatus] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [searchPending, setSearchPending] = useState(false);
   const [sort, setSort] = useState<SortOpt>(SORT_OPTIONS[0]);
   const [showNew, setShowNew] = useState(false);
   const [showImportCsv, setShowImportCsv] = useState(false);
+  const [noteFor, setNoteFor] = useState<{ id: number; name: string } | null>(null);
 
-  // Debounce search input
+  // Debounced search input
   useEffect(() => {
-    const id = setTimeout(() => setSearch(searchInput.trim()), 250);
+    if (searchInput.trim() !== search) setSearchPending(true);
+    const id = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setSearchPending(false);
+    }, 250);
     return () => clearTimeout(id);
-  }, [searchInput]);
+  }, [searchInput, search]);
 
   const load = async () => {
     setLoading(true); setErr('');
@@ -81,97 +95,106 @@ export default function ClientsPage() {
       params.set('sort_dir', sort.dir);
       const data = await api.get<{ clients: Client[] }>(`/api/clients?${params}`);
       setClients(data.clients || []);
-    } catch (e: any) {
-      setErr(e.message || 'Failed to load clients');
+    } catch (e: unknown) {
+      setErr(humanizeError(e, 'Failed to load clients.'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Reload on any filter/sort change
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, search, sort.key, sort.dir]);
 
-  const counts = useMemo(() => {
-    // Engagement-status counts come from the rollup view. Use total_engagements
-    // for the "All" tab; for status-specific tabs we'd need a server roundtrip,
-    // so skip per-tab counts in v1.
-    return { all: clients.length };
-  }, [clients]);
+  const hasFilters = Boolean(status || search);
+  const clearFilters = () => {
+    setStatus('');
+    setSearchInput('');
+  };
 
   return (
     <div>
-      <div style={headerRow}>
-        <h1 style={h1}>Clients</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setShowImportCsv(true)} style={secondaryBtn}>
-            Import CSV
-          </button>
-          <button onClick={() => setShowNew(true)} style={primaryBtn}>
-            + New Client
-          </button>
+      <div className="flex justify-between items-center mb-3">
+        <h1 className="text-2xl font-bold m-0">Clients</h1>
+        <div className="flex gap-2">
+          <SecondaryButton onClick={() => setShowImportCsv(true)}>Import CSV</SecondaryButton>
+          <PrimaryButton onClick={() => setShowNew(true)}>+ New Client</PrimaryButton>
         </div>
       </div>
 
       {/* Status tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+      <div className="flex gap-1 mb-3 flex-wrap">
         {STATUS_TABS.map((t) => (
           <button
             key={t.key || 'all'}
             onClick={() => setStatus(t.key)}
-            style={tabStyle(status === t.key)}
+            className={cn(
+              'px-3.5 py-1.5 text-xs rounded border transition-colors',
+              status === t.key
+                ? 'bg-brand-charcoal text-white border-brand-charcoal font-semibold'
+                : 'bg-surface text-ink-muted border-edge font-normal hover:border-brand-charcoal',
+            )}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      {/* Search + sort */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
-        <input
-          type="text"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search name, email, contact, or website..."
-          style={{
-            flex: 1, padding: '8px 12px', border: '1px solid #E2E6EB',
-            borderRadius: 4, fontSize: 13,
-          }}
-        />
+      {/* Search + sort + clear */}
+      <div className="flex gap-2 items-center mb-4">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search name, email, contact, or website..."
+            className="w-full px-3 py-2 border border-edge rounded text-[13px] bg-surface focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none"
+          />
+          {searchPending && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2">
+              <Spinner size={14} />
+            </span>
+          )}
+        </div>
         <select
           value={sort.key}
           onChange={(e) => {
             const opt = SORT_OPTIONS.find((o) => o.key === e.target.value);
             if (opt) setSort(opt);
           }}
-          style={{
-            padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
-            background: '#fff', fontSize: 13,
-          }}
+          className="px-2.5 py-2 border border-edge rounded bg-surface text-[13px] focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none"
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.key} value={o.key}>Sort: {o.label}</option>
           ))}
         </select>
+        {hasFilters && (
+          <button
+            onClick={clearFilters}
+            className="px-3 py-2 text-xs text-ink-muted hover:text-ink"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {err && (
-        <div style={errorBox}>{err}</div>
-      )}
+      {err && <ErrorBox>{err}</ErrorBox>}
 
       {loading ? (
-        <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        <div className="text-ink-faint text-[13px] flex items-center gap-2">
+          <Spinner /> Loading clients…
+        </div>
       ) : clients.length === 0 ? (
-        <div style={{
-          background: '#fff', padding: 40, borderRadius: 8, border: '1px solid #E2E6EB',
-          textAlign: 'center', color: '#64748B', fontSize: 13,
-        }}>
-          No clients yet. Hit <strong>+ New Client</strong> or <strong>Import CSV</strong> to get started.
+        <div className="bg-surface p-10 rounded-lg border border-edge text-center text-ink-muted text-[13px]">
+          {hasFilters ? (
+            <>No clients match those filters. <button onClick={clearFilters} className="text-brand-mint hover:underline">Clear filters</button></>
+          ) : (
+            <>No clients yet. Hit <strong>+ New Client</strong> or <strong>Import CSV</strong> to get started.</>
+          )}
         </div>
       ) : (
-        <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E2E6EB', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div className="bg-surface rounded-lg border border-edge overflow-hidden">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr style={{ background: '#F7F8FA', textAlign: 'left' }}>
+              <tr className="bg-surface-page text-left">
                 <Th>Name</Th>
                 <Th>Industry</Th>
                 <Th>Location</Th>
@@ -180,26 +203,43 @@ export default function ClientsPage() {
                 <Th align="right">Won</Th>
                 <Th align="right">Lifetime $</Th>
                 <Th>Last activity</Th>
+                <Th></Th>
               </tr>
             </thead>
             <tbody>
               {clients.map((c) => (
-                <tr key={c.id} style={{ borderTop: '1px solid #F0F2F5' }}>
-                  <td style={td}>
-                    <Link href={`/clients/${c.id}`} style={{ color: '#1B2838', fontWeight: 600 }}>
+                <tr key={c.id} className="border-t border-surface-alt hover:bg-surface-page transition-colors">
+                  <td className="px-3.5 py-2.5 text-ink">
+                    <Link href={`/clients/${c.id}`} className="text-ink font-semibold hover:text-brand-mint">
                       {c.name}
                     </Link>
                     <EnrichmentBadge status={c.enrichment_status} />
                   </td>
-                  <td style={td}>{c.industry || <span style={muted}>—</span>}</td>
-                  <td style={td}>{c.location || <span style={muted}>—</span>}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>
-                    {c.fit_score == null ? <span style={muted}>—</span> : c.fit_score}
+                  <td className="px-3.5 py-2.5 text-ink">
+                    {c.industry || <span className="text-ink-faint">—</span>}
                   </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{c.open_engagements ?? 0}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{c.won_engagements ?? 0}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{money(c.lifetime_revenue)}</td>
-                  <td style={td}>{fmtDate(c.last_activity_at)}</td>
+                  <td className="px-3.5 py-2.5 text-ink">
+                    {c.location || <span className="text-ink-faint">—</span>}
+                  </td>
+                  <td className="px-3.5 py-2.5 text-ink text-right">
+                    <FitBadge score={c.fit_score} />
+                  </td>
+                  <td className="px-3.5 py-2.5 text-ink text-right">{c.open_engagements ?? 0}</td>
+                  <td className="px-3.5 py-2.5 text-ink text-right">{c.won_engagements ?? 0}</td>
+                  <td className="px-3.5 py-2.5 text-ink text-right">{money(c.lifetime_revenue)}</td>
+                  <td className="px-3.5 py-2.5">
+                    <ActivityFreshness ts={c.last_activity_at} />
+                  </td>
+                  <td className="px-3.5 py-2.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setNoteFor({ id: c.id, name: c.name })}
+                      title="Add note"
+                      className="text-ink-faint hover:text-brand-mint p-1 rounded transition-colors"
+                    >
+                      <StickyNote size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -217,41 +257,72 @@ export default function ClientsPage() {
         onClose={() => setShowImportCsv(false)}
         onCompleted={() => { setShowImportCsv(false); void load(); }}
       />
+      <QuickNoteModal
+        open={noteFor !== null}
+        onClose={() => setNoteFor(null)}
+        onSaved={() => void load()}
+        clientId={noteFor?.id ?? 0}
+        contextLabel={noteFor?.name}
+      />
     </div>
   );
 }
 
-function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+function Th({ children, align = 'left' }: { children?: React.ReactNode; align?: 'left' | 'right' }) {
   return (
-    <th style={{
-      padding: '10px 14px', fontSize: 11, fontWeight: 600,
-      color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5,
-      textAlign: align,
-    }}>{children}</th>
+    <th
+      className={cn(
+        'px-3.5 py-2.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider',
+        align === 'right' ? 'text-right' : 'text-left',
+      )}
+    >
+      {children}
+    </th>
   );
 }
 
-const headerRow: React.CSSProperties = {
-  display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
-};
-const h1: React.CSSProperties = { fontSize: 24, fontWeight: 700, margin: 0 };
-const primaryBtn: React.CSSProperties = {
-  background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
-  padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-};
-const secondaryBtn: React.CSSProperties = {
-  background: '#fff', color: '#1B2838', border: '1px solid #E2E6EB', borderRadius: 6,
-  padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-};
-const tabStyle = (active: boolean): React.CSSProperties => ({
-  padding: '6px 14px', fontSize: 12, borderRadius: 4, border: '1px solid #E2E6EB',
-  background: active ? '#1B2838' : '#fff',
-  color: active ? '#fff' : '#64748B',
-  cursor: 'pointer', fontWeight: active ? 600 : 400,
-});
-const td: React.CSSProperties = { padding: '10px 14px', color: '#1B2838' };
-const muted: React.CSSProperties = { color: '#94a3b8' };
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
-};
+// Fit score badge with traffic-light color. <34 red, 34-66 yellow, ≥67 green.
+// Null shows as a dash since "not computed yet" should be visually distinct
+// from "computed and low".
+function FitBadge({ score }: { score?: number | null }) {
+  if (score == null) return <span className="text-ink-faint" title="Not computed yet">—</span>;
+  const tone =
+    score >= 67 ? 'bg-success-bg text-success border-success-border'
+    : score >= 34 ? 'bg-warning-bg text-warning border-warning-border'
+    : 'bg-danger-bg text-danger-strong border-danger-border';
+  return (
+    <span
+      className={cn(
+        'inline-block min-w-[36px] px-2 py-0.5 rounded-full border text-xs font-semibold tabular-nums',
+        tone,
+      )}
+    >
+      {score}
+    </span>
+  );
+}
+
+// "Last activity" cell with a colored dot — green if <7d, yellow 7-30d,
+// red >30d. Surfaces stalled deals at a glance without a separate column.
+function ActivityFreshness({ ts }: { ts?: string | null }) {
+  if (!ts) return <span className="text-ink-faint">—</span>;
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return <span className="text-ink-faint">{String(ts)}</span>;
+  const days = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+  const tone =
+    days < 7 ? 'bg-success'
+    : days <= 30 ? 'bg-warning'
+    : 'bg-danger';
+  const label =
+    days === 0 ? 'today'
+    : days === 1 ? '1 day ago'
+    : days < 30 ? `${days} days ago`
+    : days < 365 ? `${Math.floor(days / 30)} mo ago`
+    : `${Math.floor(days / 365)}y ago`;
+  return (
+    <span className="inline-flex items-center gap-2 text-ink" title={d.toLocaleString()}>
+      <span className={cn('w-2 h-2 rounded-full', tone)} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}

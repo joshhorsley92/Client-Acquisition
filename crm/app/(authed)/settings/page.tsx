@@ -4,7 +4,18 @@
 // Members get a "Settings are admin-only" message.
 
 import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { api } from '@/lib/api';
+import { toast } from '@/lib/toast';
+import { humanizeError } from '@/lib/humanize-error';
+import { Spinner } from '@/components/Skeleton';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import {
+  Field, Input, Select, ErrorBox, PrimaryButton, SecondaryButton, DangerButton,
+} from '@/components/ui/Forms';
+import { UserCreateSchema, type UserCreateInput } from '@/lib/schemas';
+import { cn } from '@/lib/cn';
 
 type Tab = 'icp' | 'users' | 'audit';
 
@@ -18,15 +29,18 @@ export default function SettingsPage() {
       .catch(() => setMe({}));
   }, []);
 
-  if (!me) return <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>;
+  if (!me) {
+    return (
+      <div className="text-ink-faint text-[13px] flex items-center gap-2">
+        <Spinner /> Loading…
+      </div>
+    );
+  }
   if (me.role !== 'admin') {
     return (
       <div>
-        <h1 style={h1}>Settings</h1>
-        <div style={{
-          background: '#fff', padding: 24, borderRadius: 8, border: '1px solid #E2E6EB',
-          fontSize: 13, color: '#64748B',
-        }}>
+        <h1 className="text-2xl font-bold m-0 mb-4">Settings</h1>
+        <div className="bg-surface p-6 rounded-lg border border-edge text-[13px] text-ink-muted">
           Settings are admin-only. Ask Joe or Josh if you need something changed here.
         </div>
       </div>
@@ -35,11 +49,11 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h1 style={h1}>Settings</h1>
-      <nav style={tabBar}>
-        <button onClick={() => setTab('icp')} style={tabBtn(tab === 'icp')}>ICP</button>
-        <button onClick={() => setTab('users')} style={tabBtn(tab === 'users')}>Users</button>
-        <button onClick={() => setTab('audit')} style={tabBtn(tab === 'audit')}>Audit log</button>
+      <h1 className="text-2xl font-bold m-0 mb-4">Settings</h1>
+      <nav className="flex gap-1 mb-5 border-b border-edge">
+        <TabButton active={tab === 'icp'} onClick={() => setTab('icp')}>ICP</TabButton>
+        <TabButton active={tab === 'users'} onClick={() => setTab('users')}>Users</TabButton>
+        <TabButton active={tab === 'audit'} onClick={() => setTab('audit')}>Audit log</TabButton>
       </nav>
       {tab === 'icp' && <IcpTab />}
       {tab === 'users' && <UsersTab />}
@@ -48,35 +62,41 @@ export default function SettingsPage() {
   );
 }
 
-// ----- ICP -----
+function TabButton({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'px-4 py-2.5 text-[13px] bg-transparent border-none cursor-pointer border-b-2 transition-colors',
+        active
+          ? 'text-ink font-semibold border-b-brand-mint'
+          : 'text-ink-muted font-normal border-b-transparent hover:text-ink',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+const panelClass = 'bg-surface rounded-lg p-4 border border-edge';
+
+// ============================================================================
+// ICP tab
+// ============================================================================
 function IcpTab() {
   const [icp, setIcp] = useState<any>(null);
   const [json, setJson] = useState('');
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     api.get<any>('/api/settings/icp')
       .then((d) => { setIcp(d); setJson(JSON.stringify(d, null, 2)); })
-      .catch((err) => setMsg(`Error: ${err.message}`));
+      .catch((err) => setLoadError(humanizeError(err, 'Failed to load ICP.')));
   }, []);
 
   async function save() {
-    setSaving(true); setMsg('');
-    try {
-      const parsed = JSON.parse(json);
-      const updated = await api.patch('/api/settings/icp', parsed); // PUT? backend uses PUT — adjust
-      setIcp(updated); setMsg('Saved.');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (err: any) {
-      setMsg(`Error: ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-  // Backend uses PUT /api/settings/icp; the PATCH above is wrong. Use raw fetch.
-  async function savePut() {
-    setSaving(true); setMsg('');
+    setSaving(true);
     try {
       const parsed = JSON.parse(json);
       const res = await fetch('/api/settings/icp', {
@@ -85,18 +105,27 @@ function IcpTab() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Status ${res.status}`);
-      setIcp(data); setMsg('Saved.');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (err: any) {
-      setMsg(`Error: ${err.message}`);
+      setIcp(data);
+      toast.success('ICP saved.');
+    } catch (err: unknown) {
+      toast.error(humanizeError(err, 'Failed to save ICP.'));
     } finally { setSaving(false); }
   }
 
-  if (!icp) return <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>;
+  if (loadError) {
+    return <div className={panelClass}><ErrorBox>{loadError}</ErrorBox></div>;
+  }
+  if (!icp) {
+    return (
+      <div className="text-ink-faint text-[13px] flex items-center gap-2">
+        <Spinner /> Loading ICP…
+      </div>
+    );
+  }
 
   return (
-    <div style={panel}>
-      <p style={{ fontSize: 13, color: '#64748B', marginTop: 0 }}>
+    <div className={panelClass}>
+      <p className="text-[13px] text-ink-muted mt-0">
         Edit the Ideal Customer Profile JSON. Scoring weights must sum to 100; revenue min must be less than max.
       </p>
       <textarea
@@ -104,28 +133,26 @@ function IcpTab() {
         onChange={(e) => setJson(e.target.value)}
         rows={28}
         spellCheck={false}
-        style={{
-          width: '100%', padding: 12, border: '1px solid #E2E6EB',
-          borderRadius: 4, fontSize: 12, fontFamily: 'monospace',
-          boxSizing: 'border-box', resize: 'vertical',
-        }}
+        className="w-full p-3 border border-edge rounded text-xs font-mono resize-y bg-surface focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none"
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-        <button onClick={savePut} disabled={saving} style={primaryBtn(saving)}>
+      <div className="flex items-center gap-3 mt-3">
+        <PrimaryButton onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save ICP'}
-        </button>
-        {msg && <span style={{ fontSize: 12, color: msg.startsWith('Error') ? '#dc2626' : '#047857' }}>{msg}</span>}
+        </PrimaryButton>
       </div>
     </div>
   );
 }
 
-// ----- Users -----
+// ============================================================================
+// Users tab
+// ============================================================================
 function UsersTab() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [recoveryLink, setRecoveryLink] = useState<string>('');
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -136,36 +163,47 @@ function UsersTab() {
   }
   useEffect(() => { void load(); }, []);
 
-  async function deleteUser(id: string) {
-    if (!confirm('Delete this user? This cannot be undone.')) return;
-    await api.del(`/api/settings/users/${id}`);
-    void load();
+  async function performDelete() {
+    if (!confirmDelete) return;
+    try {
+      await api.del(`/api/settings/users/${confirmDelete.id}`);
+      toast.success(`Deleted ${confirmDelete.name || 'user'}.`);
+      setConfirmDelete(null);
+      void load();
+    } catch (err: unknown) {
+      toast.error(humanizeError(err, 'Failed to delete user.'));
+      setConfirmDelete(null);
+    }
   }
 
   return (
-    <div style={panel}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Users</h2>
-        <button onClick={() => setShowNew(true)} style={primaryBtn(false)}>+ New user</button>
+    <div className={panelClass}>
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="text-sm font-bold m-0">Users</h2>
+        <PrimaryButton onClick={() => setShowNew(true)}>+ New user</PrimaryButton>
       </div>
       {loading ? (
-        <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        <div className="text-ink-faint text-[13px] flex items-center gap-2">
+          <Spinner /> Loading users…
+        </div>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table className="w-full border-collapse text-[13px]">
           <thead>
-            <tr style={{ textAlign: 'left' }}>
-              <th style={th}>Name</th><th style={th}>Email</th><th style={th}>Role</th><th style={th}></th>
+            <tr className="text-left">
+              <Th>Name</Th><Th>Email</Th><Th>Role</Th><Th></Th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} style={{ borderTop: '1px solid #F0F2F5' }}>
-                <td style={td}>{u.name}</td>
-                <td style={td}>{u.email}</td>
-                <td style={td}>{u.role}</td>
-                <td style={{ ...td, textAlign: 'right' }}>
-                  <button onClick={() => deleteUser(u.id)} style={dangerBtn}>Delete</button>
-                </td>
+              <tr key={u.id} className="border-t border-surface-alt">
+                <Td>{u.name}</Td>
+                <Td>{u.email}</Td>
+                <Td className="capitalize">{u.role}</Td>
+                <Td className="text-right">
+                  <DangerButton onClick={() => setConfirmDelete({ id: u.id, name: u.name || u.email })}>
+                    Delete
+                  </DangerButton>
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -178,65 +216,108 @@ function UsersTab() {
           onCreated={(link) => { setRecoveryLink(link); setShowNew(false); void load(); }}
         />
       )}
+
       {recoveryLink && (
-        <div style={{ marginTop: 16, padding: 12, background: '#E6FAF5', borderRadius: 6, border: '1px solid #6EE7B7' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#047857', marginBottom: 6 }}>
+        <div className="mt-4 p-3 bg-success-bg rounded-md border border-success-border">
+          <div className="text-xs font-semibold text-success mb-1.5">
             Send this recovery link to the new user — it expires in ~1 hour:
           </div>
-          <div style={{ fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all', color: '#064e3b' }}>
+          <div className="text-[11px] font-mono break-all text-success">
             {recoveryLink}
           </div>
-          <button onClick={() => setRecoveryLink('')} style={{ marginTop: 8, ...secondaryBtn, fontSize: 11, padding: '4px 10px' }}>
-            Dismiss
-          </button>
+          <div className="flex gap-1.5 mt-2">
+            <SecondaryButton
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(recoveryLink);
+                  toast.success('Recovery link copied.');
+                } catch {
+                  toast.error('Could not copy. Select the link manually.');
+                }
+              }}
+              className="text-[11px] px-2.5 py-1"
+            >
+              Copy link
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={() => setRecoveryLink('')}
+              className="text-[11px] px-2.5 py-1"
+            >
+              Dismiss
+            </SecondaryButton>
+          </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete user?"
+        body={confirmDelete && (
+          <span>
+            This will permanently remove <strong>{confirmDelete.name}</strong> and revoke their access.
+            This cannot be undone.
+          </span>
+        )}
+        confirmLabel="Delete user"
+        tone="danger"
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={performDelete}
+      />
     </div>
   );
 }
 
 function NewUserForm({ onClose, onCreated }: { onClose: () => void; onCreated: (link: string) => void }) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'member' | 'admin'>('member');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const {
+    register, handleSubmit, formState: { errors, isSubmitting },
+    setError,
+  } = useForm<UserCreateInput>({
+    resolver: zodResolver(UserCreateSchema),
+    defaultValues: { role: 'member' },
+  });
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true); setError('');
+  const onSubmit = handleSubmit(async (data) => {
     try {
-      const data = await api.post<{ user: any; recovery_link: string }>('/api/settings/users', { name, email, role });
-      onCreated(data.recovery_link);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create');
-    } finally { setSubmitting(false); }
-  }
+      const res = await api.post<{ user: any; recovery_link: string }>('/api/settings/users', data);
+      toast.success(`Created ${data.name}. Send them the recovery link to set a password.`);
+      onCreated(res.recovery_link);
+    } catch (err: unknown) {
+      const message = humanizeError(err, 'Failed to create user.');
+      setError('root', { message });
+      toast.error(message);
+    }
+  });
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 16, padding: 12, background: '#F7F8FA', borderRadius: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px auto', gap: 8, alignItems: 'flex-end' }}>
-        <Field label="Name"><input style={input} value={name} onChange={(e) => setName(e.target.value)} required /></Field>
-        <Field label="Email"><input style={input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
+    <form onSubmit={onSubmit} className="mt-4 p-3 bg-surface-page rounded-md">
+      <div className="grid gap-2 items-end" style={{ gridTemplateColumns: '1fr 1fr 120px auto' }}>
+        <Field label="Name" required error={errors.name?.message}>
+          <Input {...register('name')} aria-invalid={errors.name ? 'true' : 'false'} />
+        </Field>
+        <Field label="Email" required error={errors.email?.message}>
+          <Input type="email" {...register('email')} aria-invalid={errors.email ? 'true' : 'false'} />
+        </Field>
         <Field label="Role">
-          <select style={input} value={role} onChange={(e) => setRole(e.target.value as any)}>
+          <Select {...register('role')}>
             <option value="member">member</option>
             <option value="admin">admin</option>
-          </select>
+          </Select>
         </Field>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button type="button" onClick={onClose} style={secondaryBtn}>Cancel</button>
-          <button type="submit" disabled={submitting} style={primaryBtn(submitting)}>
-            {submitting ? 'Creating…' : 'Create'}
-          </button>
+        <div className="flex gap-1.5">
+          <SecondaryButton type="button" onClick={onClose}>Cancel</SecondaryButton>
+          <PrimaryButton type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating…' : 'Create'}
+          </PrimaryButton>
         </div>
       </div>
-      {error && <div style={{ ...errorBox, marginTop: 8 }}>{error}</div>}
+      {errors.root?.message && <div className="mt-2"><ErrorBox>{errors.root.message}</ErrorBox></div>}
     </form>
   );
 }
 
-// ----- Audit log -----
+// ============================================================================
+// Audit log tab
+// ============================================================================
 function AuditTab() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -251,32 +332,38 @@ function AuditTab() {
   }, [page]);
 
   return (
-    <div style={panel}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Audit log ({total})</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} style={secondaryBtn}>Prev</button>
-          <span style={{ fontSize: 13, color: '#64748B', alignSelf: 'center' }}>Page {page}</span>
-          <button onClick={() => setPage((p) => p + 1)} disabled={logs.length < 50} style={secondaryBtn}>Next</button>
+    <div className={panelClass}>
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="text-sm font-bold m-0">Audit log ({total})</h2>
+        <div className="flex gap-2 items-center">
+          <SecondaryButton onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+            Prev
+          </SecondaryButton>
+          <span className="text-[13px] text-ink-muted">Page {page}</span>
+          <SecondaryButton onClick={() => setPage((p) => p + 1)} disabled={logs.length < 50}>
+            Next
+          </SecondaryButton>
         </div>
       </div>
       {loading ? (
-        <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        <div className="text-ink-faint text-[13px] flex items-center gap-2">
+          <Spinner /> Loading audit log…
+        </div>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <table className="w-full border-collapse text-xs">
           <thead>
-            <tr style={{ textAlign: 'left' }}>
-              <th style={th}>Time</th><th style={th}>User</th><th style={th}>Action</th><th style={th}>Resource</th><th style={th}>IP</th>
+            <tr className="text-left">
+              <Th>Time</Th><Th>User</Th><Th>Action</Th><Th>Resource</Th><Th>IP</Th>
             </tr>
           </thead>
           <tbody>
             {logs.map((l) => (
-              <tr key={l.id} style={{ borderTop: '1px solid #F0F2F5' }}>
-                <td style={td}>{new Date(l.created_at).toLocaleString()}</td>
-                <td style={td}>{l.user_name || l.user_email || <span style={{ color: '#94a3b8' }}>system</span>}</td>
-                <td style={td}>{l.action}</td>
-                <td style={td}>{l.resource_type ? `${l.resource_type}#${l.resource_id || '—'}` : ''}</td>
-                <td style={td}>{l.ip_address || ''}</td>
+              <tr key={l.id} className="border-t border-surface-alt">
+                <Td>{new Date(l.created_at).toLocaleString()}</Td>
+                <Td>{l.user_name || l.user_email || <span className="text-ink-faint">system</span>}</Td>
+                <Td>{l.action}</Td>
+                <Td>{l.resource_type ? `${l.resource_type}#${l.resource_id || '—'}` : ''}</Td>
+                <Td>{l.ip_address || ''}</Td>
               </tr>
             ))}
           </tbody>
@@ -286,46 +373,14 @@ function AuditTab() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Th({ children }: { children?: React.ReactNode }) {
   return (
-    <div>
-      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 4 }}>{label}</label>
+    <th className="px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
       {children}
-    </div>
+    </th>
   );
 }
 
-const h1: React.CSSProperties = { fontSize: 24, fontWeight: 700, margin: '0 0 16px 0' };
-const tabBar: React.CSSProperties = { display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid #E2E6EB' };
-const tabBtn = (active: boolean): React.CSSProperties => ({
-  padding: '10px 16px', fontSize: 13, fontWeight: active ? 600 : 400,
-  background: 'none', border: 'none', cursor: 'pointer',
-  color: active ? '#1B2838' : '#64748B',
-  borderBottom: active ? '2px solid #00D4AA' : '2px solid transparent',
-});
-const panel: React.CSSProperties = {
-  background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #E2E6EB',
-};
-const input: React.CSSProperties = {
-  width: '100%', padding: '6px 10px', border: '1px solid #E2E6EB',
-  borderRadius: 4, fontSize: 13, boxSizing: 'border-box',
-};
-const th: React.CSSProperties = { padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 };
-const td: React.CSSProperties = { padding: '6px 10px', color: '#1B2838' };
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: '6px 14px', background: '#00D4AA', color: '#1B2838', border: 'none',
-  borderRadius: 4, fontSize: 13, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-const secondaryBtn: React.CSSProperties = {
-  padding: '6px 14px', background: '#fff', color: '#1B2838',
-  border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-};
-const dangerBtn: React.CSSProperties = {
-  padding: '4px 10px', background: '#fff', color: '#dc2626',
-  border: '1px solid #FCA5A5', borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-};
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12,
-};
+function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <td className={cn('px-2.5 py-1.5 text-ink', className)}>{children}</td>;
+}

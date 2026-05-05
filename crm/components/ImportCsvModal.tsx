@@ -1,12 +1,15 @@
 'use client';
 
 // CSV import modal — file picker, header preview, run, result panel.
-// Mirrors the prototype behavior; file goes to POST /api/import-clients
-// (multipart) which streams it through csv-parse server-side.
+// CSV is a multipart upload (not a JSON payload), so this stays a manual
+// form rather than wiring up react-hook-form.
 
 import { useState, useRef } from 'react';
 import Modal from './Modal';
+import { ErrorBox, PrimaryButton, SecondaryButton } from './ui/Forms';
 import { api } from '@/lib/api';
+import { humanizeError } from '@/lib/humanize-error';
+import { cn } from '@/lib/cn';
 
 const REQUIRED_HEADER = 'name';
 const KNOWN_COLUMNS = [
@@ -78,8 +81,8 @@ export default function ImportCsvModal({
           unknownColumns: headers.filter((h) => h && !KNOWN_COLUMNS.includes(h)),
         });
         setPreviewError('');
-      } catch (err: any) {
-        setPreviewError(`Could not preview: ${err.message}`);
+      } catch (err: unknown) {
+        setPreviewError(humanizeError(err, 'Could not preview the file.'));
         setPreview(null);
       }
     };
@@ -94,8 +97,8 @@ export default function ImportCsvModal({
       fd.append('file', file);
       const res = await api.postForm<ImportResult>('/api/import-clients', fd);
       setResult(res);
-    } catch (err: any) {
-      setError(err.message || 'Import failed');
+    } catch (err: unknown) {
+      setError(humanizeError(err, 'Import failed.'));
     } finally {
       setSubmitting(false);
     }
@@ -104,55 +107,75 @@ export default function ImportCsvModal({
   if (!open) return null;
 
   return (
-    <Modal open={open} onClose={handleClose} title="Import Clients from CSV" width={620}>
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Import Clients from CSV"
+      width={620}
+    >
       {!result && (
         <>
-          <div style={{ fontSize: 13, color: '#64748B', marginBottom: 14, lineHeight: 1.5 }}>
+          <div className="text-[13px] text-ink-muted mb-3.5 leading-relaxed">
             Upload a CSV with one row per client. <strong>name</strong> is required;
             everything else is optional. Already-imported leads (matched by{' '}
-            <code style={code}>source_lead_id</code> or{' '}
-            <code style={code}>name+email</code>) are skipped automatically.
+            <code className="bg-surface-page px-1.5 py-px rounded text-xs font-mono">source_lead_id</code> or{' '}
+            <code className="bg-surface-page px-1.5 py-px rounded text-xs font-mono">name+email</code>) are skipped automatically.
           </div>
 
-          <div style={{ marginBottom: 12 }}>
+          <div className="mb-3">
             <input
               ref={fileInputRef}
               type="file"
               accept=".csv,text/csv"
               onChange={handleFileChange}
-              style={{ fontSize: 13 }}
+              className="text-[13px]"
             />
           </div>
 
-          {previewError && <div style={errorBox}>{previewError}</div>}
+          {previewError && <ErrorBox>{previewError}</ErrorBox>}
 
           {preview && (
-            <div style={{ marginBottom: 14 }}>
+            <div className="mb-3.5">
               {!preview.hasName && (
-                <div style={errorBox}>
+                <ErrorBox>
                   Missing required column <strong>name</strong>. The first row of the CSV is the header.
-                </div>
+                </ErrorBox>
               )}
               {preview.unknownColumns.length > 0 && (
-                <div style={{ ...errorBox, background: '#FFF8E6', color: '#A16207', borderColor: '#FCD34D' }}>
+                <div className="bg-warning-bg text-warning border border-warning-border px-3 py-2 rounded text-xs mb-3">
                   Ignored columns: {preview.unknownColumns.join(', ')}
                 </div>
               )}
-              <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, marginBottom: 6 }}>
+              <div className="text-[11px] text-ink-muted font-semibold mb-1.5">
                 Preview ({preview.rows.length} of first 5 rows)
               </div>
-              <div style={{ overflow: 'auto', border: '1px solid #E2E6EB', borderRadius: 4 }}>
-                <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+              <div className="overflow-auto border border-edge rounded">
+                <table className="w-full text-[11px] border-collapse">
                   <thead>
                     <tr>{preview.headers.map((h, i) => (
-                      <th key={i} style={cellHead(KNOWN_COLUMNS.includes(h))}>{h}</th>
+                      <th
+                        key={i}
+                        className={cn(
+                          'px-2.5 py-1.5 font-semibold text-left border-b border-edge',
+                          KNOWN_COLUMNS.includes(h)
+                            ? 'bg-success-bg text-success'
+                            : 'bg-warning-bg text-warning',
+                        )}
+                      >
+                        {h}
+                      </th>
                     ))}</tr>
                   </thead>
                   <tbody>
                     {preview.rows.map((row, ri) => (
                       <tr key={ri}>
                         {row.map((cell, ci) => (
-                          <td key={ci} style={cell$}>{cell || <span style={{ color: '#94a3b8' }}>—</span>}</td>
+                          <td
+                            key={ci}
+                            className="px-2.5 py-1 border-b border-surface-alt max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap"
+                          >
+                            {cell || <span className="text-ink-faint">—</span>}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -162,17 +185,16 @@ export default function ImportCsvModal({
             </div>
           )}
 
-          {error && <div style={errorBox}>{error}</div>}
+          {error && <ErrorBox>{error}</ErrorBox>}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button onClick={handleClose} disabled={submitting} style={secondaryBtn}>Cancel</button>
-            <button
+          <div className="flex justify-end gap-2">
+            <SecondaryButton onClick={handleClose} disabled={submitting}>Cancel</SecondaryButton>
+            <PrimaryButton
               onClick={submit}
-              disabled={!file || submitting || (preview && !preview.hasName) === true}
-              style={primaryBtn(!file || submitting || (preview && !preview.hasName) === true)}
+              disabled={!file || submitting || (preview ? !preview.hasName : false)}
             >
               {submitting ? 'Importing…' : 'Import clients'}
-            </button>
+            </PrimaryButton>
           </div>
         </>
       )}
@@ -191,71 +213,52 @@ export default function ImportCsvModal({
 function ImportResultView({ result, onClose, onAnother }: { result: ImportResult; onClose: () => void; onAnother: () => void }) {
   return (
     <div>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
-        padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 14,
-      }}>
-        <Stat label="Imported" value={result.imported} accent="#00D4AA" />
-        <Stat label="Skipped" value={result.skipped} accent="#64748B" />
-        <Stat label="Errors" value={result.errors?.length || 0} accent={(result.errors?.length || 0) > 0 ? '#dc2626' : '#94a3b8'} />
+      <div className="grid grid-cols-3 gap-2 p-2.5 bg-surface-page rounded-md mb-3.5">
+        <Stat label="Imported" value={result.imported} tone="success" />
+        <Stat label="Skipped" value={result.skipped} tone="muted" />
+        <Stat
+          label="Errors"
+          value={result.errors?.length || 0}
+          tone={(result.errors?.length || 0) > 0 ? 'danger' : 'muted'}
+        />
       </div>
       {result.errors?.length > 0 && (
-        <details style={{ marginBottom: 12 }}>
-          <summary style={{ fontSize: 12, color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}>
+        <details className="mb-3">
+          <summary className="text-xs text-danger cursor-pointer font-semibold">
             {result.errors.length} error{result.errors.length === 1 ? '' : 's'} — click to view
           </summary>
-          <ul style={{ margin: '8px 0 0 16px', fontSize: 12, color: '#1B2838' }}>
+          <ul className="mt-2 ml-4 text-xs text-ink list-disc">
             {result.errors.map((e, i) => <li key={i}>Row {e.row}: {e.reason}</li>)}
           </ul>
         </details>
       )}
       {result.skipped_details && result.skipped_details.length > 0 && (
-        <details style={{ marginBottom: 12 }}>
-          <summary style={{ fontSize: 12, color: '#64748B', cursor: 'pointer' }}>
+        <details className="mb-3">
+          <summary className="text-xs text-ink-muted cursor-pointer">
             {result.skipped_details.length} skipped — click to view
           </summary>
-          <ul style={{ margin: '8px 0 0 16px', fontSize: 12, color: '#64748B' }}>
+          <ul className="mt-2 ml-4 text-xs text-ink-muted list-disc">
             {result.skipped_details.map((s, i) => <li key={i}>Row {s.row}: {s.reason}</li>)}
           </ul>
         </details>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button onClick={onAnother} style={secondaryBtn}>Import another</button>
-        <button onClick={onClose} style={primaryBtn(false)}>Close</button>
+      <div className="flex justify-end gap-2">
+        <SecondaryButton onClick={onAnother}>Import another</SecondaryButton>
+        <PrimaryButton onClick={onClose}>Close</PrimaryButton>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: number; accent: string }) {
+function Stat({ label, value, tone }: { label: string; value: number; tone: 'success' | 'muted' | 'danger' }) {
+  const valueClass =
+    tone === 'success' ? 'text-brand-mint' :
+    tone === 'danger' ? 'text-danger' :
+    'text-ink-muted';
   return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{value ?? 0}</div>
-      <div style={{ fontSize: 11, color: '#64748B' }}>{label}</div>
+    <div className="text-center">
+      <div className={cn('text-2xl font-bold', valueClass)}>{value ?? 0}</div>
+      <div className="text-[11px] text-ink-muted">{label}</div>
     </div>
   );
 }
-
-const code: React.CSSProperties = { background: '#F7F8FA', padding: '1px 5px', borderRadius: 3, fontSize: 12, fontFamily: 'monospace' };
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 10,
-};
-const secondaryBtn: React.CSSProperties = {
-  padding: '8px 16px', background: '#fff', color: '#1B2838',
-  border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-};
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: '8px 16px', background: '#00D4AA', color: '#1B2838',
-  border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-const cellHead = (known: boolean): React.CSSProperties => ({
-  padding: '6px 10px', background: known ? '#E6FAF5' : '#FFF8E6',
-  color: known ? '#047857' : '#A16207',
-  fontWeight: 600, textAlign: 'left', borderBottom: '1px solid #E2E6EB',
-});
-const cell$: React.CSSProperties = {
-  padding: '4px 10px', borderBottom: '1px solid #F3F4F6', maxWidth: 160,
-  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-};

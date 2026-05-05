@@ -2,9 +2,10 @@
 // POST /api/settings/users  — admin creates a new user (sends recovery link instead of setting password)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { requireAdminAuth, isAuthError } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase-server';
+import { audit } from '@/lib/audit';
+import { UserCreateSchema } from '@/lib/schemas';
 
 export async function GET() {
   const result = await requireAdminAuth();
@@ -19,18 +20,13 @@ export async function GET() {
   return NextResponse.json({ users: data });
 }
 
-const Body = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
-  role: z.enum(['member', 'admin']).optional(),
-});
-
 export async function POST(req: NextRequest) {
   const result = await requireAdminAuth();
   if (isAuthError(result)) return result;
+  const { auth } = result;
 
   let body;
-  try { body = Body.parse(await req.json()); }
+  try { body = UserCreateSchema.parse(await req.json()); }
   catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid body' }, { status: 400 });
   }
@@ -44,7 +40,7 @@ export async function POST(req: NextRequest) {
     email: body.email,
     password: tempPassword,
     email_confirm: true,
-    user_metadata: { name: body.name, role: body.role || 'member' },
+    user_metadata: { name: body.name, role: body.role },
   });
   if (createErr) {
     return NextResponse.json({ error: createErr.message }, { status: 400 });
@@ -60,13 +56,22 @@ export async function POST(req: NextRequest) {
     email: body.email,
   });
 
+  await audit({
+    userId: auth.userId,
+    action: 'create_user',
+    resourceType: 'user',
+    resourceId: created.user?.id,
+    metadata: { email: body.email, role: body.role },
+    request: req,
+  });
+
   return NextResponse.json(
     {
       user: {
         id: created.user?.id,
         name: body.name,
         email: body.email,
-        role: body.role || 'member',
+        role: body.role,
       },
       recovery_link: link?.properties?.action_link || null,
     },

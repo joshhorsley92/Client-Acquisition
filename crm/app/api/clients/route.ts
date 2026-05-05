@@ -4,6 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
+import { ClientCreateSchema } from '@/lib/schemas';
 
 const SORT_COLUMNS = new Set([
   'created_at', 'name', 'lifetime_revenue', 'last_activity_at', 'fit_score',
@@ -52,20 +54,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ clients: data });
 }
 
-const CreateBody = z.object({
-  name: z.string().min(1),
-  website: z.string().nullish(),
-  industry: z.string().nullish(),
-  location: z.string().nullish(),
-  type: z.enum(['B2B', 'B2C']).nullish(),
-  primary_contact_name: z.string().nullish(),
-  email: z.string().nullish(),
-  phone: z.string().nullish(),
-  role: z.string().nullish(),
-  preferred_contact: z.enum(['email', 'phone', 'text', 'linkedin']).nullish(),
-  employee_count: z.string().nullish(),
-  revenue_estimate: z.string().nullish(),
-  notes: z.string().nullish(),
+// Server-side, additional_contacts and social_links are accepted (programmatic
+// callers send them); the client form schema in lib/schemas omits them.
+const ServerClientCreate = ClientCreateSchema.extend({
   additional_contacts: z.array(z.any()).optional(),
   social_links: z.record(z.string()).optional(),
 });
@@ -77,7 +68,7 @@ export async function POST(req: NextRequest) {
 
   let body;
   try {
-    body = CreateBody.parse(await req.json());
+    body = ServerClientCreate.parse(await req.json());
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Invalid body' },
@@ -91,6 +82,15 @@ export async function POST(req: NextRequest) {
     .select('*')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'create',
+    resourceType: 'client',
+    resourceId: data.id,
+    metadata: { name: data.name },
+    request: req,
+  });
 
   return NextResponse.json({ client: data }, { status: 201 });
 }

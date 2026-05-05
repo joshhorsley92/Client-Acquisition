@@ -79,7 +79,7 @@ export default function BrandProfileEditor({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="flex flex-col gap-4">
       <Section title="Business">
         <Row>
           <Field label="Business name">
@@ -167,7 +167,7 @@ export default function BrandProfileEditor({
               value={local.brand_personality?.formality_level || ''}
               onChange={(e) => set(['brand_personality', 'formality_level'], e.target.value || null)}
               disabled={disabled}
-              style={inputStyle}
+              className={inputClass}
             >
               <option value="">—</option>
               <option value="casual">Casual</option>
@@ -225,28 +225,30 @@ export default function BrandProfileEditor({
 }
 
 // ----- subcomponents -----
+const inputClass =
+  'w-full px-2.5 py-1.5 border border-edge rounded text-[13px] bg-surface ' +
+  'focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none ' +
+  'disabled:bg-surface-alt disabled:text-ink-muted disabled:cursor-not-allowed';
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <fieldset style={{
-      border: '1px solid #E2E6EB', borderRadius: 8, padding: 16, margin: 0,
-    }}>
-      <legend style={{
-        fontSize: 11, fontWeight: 700, color: '#64748B',
-        textTransform: 'uppercase', letterSpacing: 0.5, padding: '0 6px',
-      }}>{title}</legend>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <fieldset className="border border-edge rounded-lg p-4 m-0">
+      <legend className="text-[11px] font-bold text-ink-muted uppercase tracking-wider px-1.5">
+        {title}
+      </legend>
+      <div className="flex flex-col gap-2.5">
         {children}
       </div>
     </fieldset>
   );
 }
 function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>{children}</div>;
+  return <div className="grid grid-cols-2 gap-2.5">{children}</div>;
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 4 }}>
+      <label className="block text-[11px] text-ink-muted mb-1">
         {label}
       </label>
       {children}
@@ -260,7 +262,7 @@ function Input({ value, onChange, disabled, type = 'text' }: { value: string | n
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      style={inputStyle}
+      className={inputClass}
     />
   );
 }
@@ -271,21 +273,21 @@ function Textarea({ value, onChange, disabled, rows = 3 }: { value: string; onCh
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       rows={rows}
-      style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
+      className={`${inputClass} font-sans resize-y`}
     />
   );
 }
 function ColorField({ label, value, onChange, disabled }: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
     <div>
-      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 4 }}>{label}</label>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <label className="block text-[11px] text-ink-muted mb-1">{label}</label>
+      <div className="flex gap-1.5 items-center">
         <input
           type="color"
           value={value || '#ffffff'}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          style={{ width: 40, height: 32, padding: 0, border: '1px solid #E2E6EB', borderRadius: 4, cursor: 'pointer' }}
+          className="w-10 h-8 p-0 border border-edge rounded cursor-pointer"
         />
         <input
           type="text"
@@ -293,14 +295,13 @@ function ColorField({ label, value, onChange, disabled }: { label: string; value
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           placeholder="#1B2838"
-          style={{ ...inputStyle, flex: 1 }}
+          className={`${inputClass} flex-1`}
         />
       </div>
     </div>
   );
 }
 function ListEditor({ value, onChange, disabled }: { value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
-  // Newline-separated string in the textarea, array in state.
   return (
     <textarea
       value={(value || []).join('\n')}
@@ -308,12 +309,7 @@ function ListEditor({ value, onChange, disabled }: { value: string[]; onChange: 
       disabled={disabled}
       rows={Math.max(2, (value || []).length + 1)}
       placeholder="One item per line"
-      style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
+      className={`${inputClass} font-sans resize-y`}
     />
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '6px 10px', border: '1px solid #E2E6EB',
-  borderRadius: 4, fontSize: 13, boxSizing: 'border-box',
-};

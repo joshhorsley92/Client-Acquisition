@@ -29,7 +29,7 @@ export default async function CallDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div>
-      <Link href="/calls" style={{ color: '#00D4AA', fontSize: 13, textDecoration: 'none' }}>
+      <Link href="/calls" className="text-brand-mint text-[13px] hover:underline">
         ← Back to calls
       </Link>
       <CallDetailView initialCall={flat} />

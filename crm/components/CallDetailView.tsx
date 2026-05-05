@@ -2,14 +2,15 @@
 
 // Call detail UI: transcript editor + audio playback + Brand Profile
 // extraction button + Apply-to-client conflict diff modal.
-//
-// Whisper status row + retry button are intentionally omitted — v1.0
-// has no auto-transcription (paste manually).
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import ConflictDiffModal from './ConflictDiffModal';
+import { ErrorBox, PrimaryButton, SecondaryButton } from './ui/Forms';
+import { toast } from '@/lib/toast';
+import { humanizeError } from '@/lib/humanize-error';
+import { cn } from '@/lib/cn';
 
 type Choice = 'keep' | 'take' | 'skip';
 
@@ -23,9 +24,7 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
   const [savingTranscript, setSavingTranscript] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState('');
-  const [savedMessage, setSavedMessage] = useState('');
 
-  // Fetch a signed audio URL on mount if there's an audio file
   useEffect(() => {
     if (!call.audio_storage_path) return;
     api.get<{ url: string }>(`/api/calls/${call.id}/audio`)
@@ -35,25 +34,23 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
 
   const extraction = call.extracted_profile_json || null;
 
-  // ----- Save transcript / notes -----
   async function saveTranscript() {
-    setSavingTranscript(true); setSavedMessage('');
+    setSavingTranscript(true);
     try {
       const { call: updated } = await api.patch<{ call: any }>(`/api/calls/${call.id}`, {
         transcript, notes,
       });
       setCall(updated);
       setDirty(false);
-      setSavedMessage('Saved');
-      setTimeout(() => setSavedMessage(''), 2000);
-    } catch (err: any) {
-      setSavedMessage(`Error: ${err.message}`);
+      toast.success('Transcript saved.');
+    } catch (err: unknown) {
+      toast.error(humanizeError(err, 'Failed to save transcript.'));
     } finally {
       setSavingTranscript(false);
     }
   }
 
-  // ----- Speaker rename -----
+  // Speaker rename
   const [speakerA, setSpeakerA] = useState('');
   const [speakerB, setSpeakerB] = useState('');
   const hasSpeakerLabels = /\bSpeaker [AB]:/.test(transcript);
@@ -69,25 +66,24 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
     }
   }
 
-  // ----- Extract Brand Profile -----
   async function extract() {
     setExtractError(''); setExtracting(true);
     try {
-      // Save any pending transcript edits first
       if (dirty) await saveTranscript();
       const { extraction: result } = await api.post<{ extraction: any }>(`/api/calls/${call.id}/extract-brand-profile`);
       const fresh = await api.get<{ call: any }>(`/api/calls/${call.id}`);
       setCall(fresh.call);
-      setSavedMessage(`Extracted ${result.completion_percent || 0}% complete profile`);
-      setTimeout(() => setSavedMessage(''), 4000);
-    } catch (err: any) {
-      setExtractError(err.message || 'Extraction failed');
+      toast.success(`Extracted ${result.completion_percent || 0}% complete Brand Profile.`);
+    } catch (err: unknown) {
+      const message = humanizeError(err, 'Extraction failed.');
+      setExtractError(message);
+      toast.error(message);
     } finally {
       setExtracting(false);
     }
   }
 
-  // ----- Apply-to-client diff modal -----
+  // Apply-to-client diff modal
   const [conflicts, setConflicts] = useState<any[] | null>(null);
   const [conflictChoices, setConflictChoices] = useState<Record<string, Choice>>({});
   const [applying, setApplying] = useState(false);
@@ -106,8 +102,10 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
       for (const c of list) defaults[c.path] = 'take';
       setConflicts(list);
       setConflictChoices(defaults);
-    } catch (err: any) {
-      setExtractError(err.message || 'Apply failed');
+    } catch (err: unknown) {
+      const message = humanizeError(err, 'Could not preview the apply.');
+      setExtractError(message);
+      toast.error(message);
     }
   }
 
@@ -122,12 +120,13 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
       if (applied) parts.push(`${applied} updated`);
       if (merged) parts.push(`${merged} merged`);
       if (skipped) parts.push(`${skipped} preserved`);
-      setSavedMessage(`Applied to client — ${parts.join(', ') || 'no changes'}`);
-      setTimeout(() => setSavedMessage(''), 4000);
+      toast.success(`Applied to client — ${parts.join(', ') || 'no changes'}.`);
       setConflicts(null);
       setConflictChoices({});
-    } catch (err: any) {
-      setExtractError(err.message || 'Apply failed');
+    } catch (err: unknown) {
+      const message = humanizeError(err, 'Apply failed.');
+      setExtractError(message);
+      toast.error(message);
     } finally {
       setApplying(false);
     }
@@ -135,48 +134,58 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
 
   return (
     <div>
-      <header style={{ marginTop: 12, marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
+      <header className="mt-3 mb-5">
+        <h1 className="text-[22px] font-bold m-0">
           Call —{' '}
           {call.client_id ? (
-            <Link href={`/clients/${call.client_id}`} style={{ color: '#00D4AA' }}>
+            <Link href={`/clients/${call.client_id}`} className="text-brand-mint hover:underline">
               {call.client_name || `Client #${call.client_id}`}
             </Link>
           ) : 'Unknown client'}
         </h1>
-        <div style={{ fontSize: 13, color: '#64748B', marginTop: 4 }}>
+        <div className="text-[13px] text-ink-muted mt-1">
           {call.call_date ? new Date(call.call_date).toLocaleString() : new Date(call.created_at).toLocaleString()}
           {call.duration_minutes && ` · ${call.duration_minutes} min`}
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
-        {/* Left column: transcript + notes */}
-        <div style={panel}>
+      <div className="grid grid-cols-[2fr_1fr] gap-5">
+        <div className={panelClass}>
           <PanelTitle>
             Transcript
-            <span style={{ fontSize: 11, color: '#64748B', marginLeft: 12 }}>
+            <span className="text-[11px] text-ink-muted ml-3 font-normal">
               {call.transcript_source ? `Source: ${call.transcript_source}` : 'No transcript yet'}
               {transcript && ` · ${transcript.trim().split(/\s+/).length} words`}
             </span>
           </PanelTitle>
 
           {hasSpeakerLabels && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
-              padding: '8px 10px', background: '#F7F8FA',
-              border: '1px solid #E2E6EB', borderRadius: 4,
-            }}>
-              <span style={{ fontSize: 11, color: '#64748B', fontWeight: 600 }}>Rename:</span>
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>A →</span>
-              <input value={speakerA} onChange={(e) => setSpeakerA(e.target.value)} placeholder="e.g. Josh"
-                style={renameInputStyle} />
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>B →</span>
-              <input value={speakerB} onChange={(e) => setSpeakerB(e.target.value)} placeholder="e.g. Sarah"
-                style={renameInputStyle} />
-              <button onClick={applySpeakerRename}
+            <div className="flex items-center gap-2 mb-2.5 px-2.5 py-2 bg-surface-page border border-edge rounded">
+              <span className="text-[11px] text-ink-muted font-semibold">Rename:</span>
+              <span className="text-[11px] text-ink-faint">A →</span>
+              <input
+                value={speakerA}
+                onChange={(e) => setSpeakerA(e.target.value)}
+                placeholder="e.g. Josh"
+                className="w-[110px] px-2 py-1 border border-edge rounded text-xs"
+              />
+              <span className="text-[11px] text-ink-faint">B →</span>
+              <input
+                value={speakerB}
+                onChange={(e) => setSpeakerB(e.target.value)}
+                placeholder="e.g. Sarah"
+                className="w-[110px] px-2 py-1 border border-edge rounded text-xs"
+              />
+              <button
+                onClick={applySpeakerRename}
                 disabled={!(renameValid(speakerA) || renameValid(speakerB))}
-                style={renameBtn(!(renameValid(speakerA) || renameValid(speakerB)))}>
+                className={cn(
+                  'px-3 py-1 rounded text-xs font-semibold border-none',
+                  (renameValid(speakerA) || renameValid(speakerB))
+                    ? 'bg-brand-charcoal text-white cursor-pointer hover:bg-ink'
+                    : 'bg-edge text-ink-faint cursor-not-allowed',
+                )}
+              >
                 Apply rename
               </button>
             </div>
@@ -187,87 +196,73 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
             onChange={(e) => { setTranscript(e.target.value); setDirty(true); }}
             placeholder="Paste the call transcript here. Then click 'Extract Brand Profile' on the right."
             rows={20}
-            style={{
-              width: '100%', padding: '10px 12px', border: '1px solid #E2E6EB',
-              borderRadius: 4, fontSize: 13, fontFamily: 'inherit',
-              resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.5,
-            }}
+            className="w-full px-3 py-2.5 border border-edge rounded text-[13px] font-sans resize-y leading-relaxed focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none"
           />
-          <div style={{ marginTop: 12 }}>
-            <label style={{ fontSize: 13, color: '#64748B', display: 'block', marginBottom: 4 }}>Notes</label>
+          <div className="mt-3">
+            <label className="block text-[13px] text-ink-muted mb-1">Notes</label>
             <textarea
               value={notes}
               onChange={(e) => { setNotes(e.target.value); setDirty(true); }}
               rows={2}
-              style={{
-                width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
-                borderRadius: 4, fontSize: 13, fontFamily: 'inherit',
-                resize: 'vertical', boxSizing: 'border-box',
-              }}
+              className="w-full px-2.5 py-2 border border-edge rounded text-[13px] font-sans resize-y focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none"
             />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-            <button onClick={saveTranscript} disabled={!dirty || savingTranscript} style={primaryBtn(!dirty || savingTranscript)}>
+          <div className="flex items-center gap-3 mt-3">
+            <PrimaryButton onClick={saveTranscript} disabled={!dirty || savingTranscript}>
               {savingTranscript ? 'Saving…' : 'Save transcript'}
-            </button>
-            {savedMessage && (
-              <span style={{ fontSize: 12, color: savedMessage.startsWith('Error') ? '#dc2626' : '#047857', fontWeight: 600 }}>
-                {savedMessage}
-              </span>
-            )}
-            {dirty && !savedMessage && <span style={{ fontSize: 12, color: '#64748B' }}>Unsaved changes</span>}
+            </PrimaryButton>
+            {dirty && <span className="text-xs text-ink-muted">Unsaved changes</span>}
           </div>
         </div>
 
-        {/* Right column: audio + extraction */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="flex flex-col gap-4">
           {call.audio_storage_path && (
-            <div style={panel}>
+            <div className={panelClass}>
               <PanelTitle>Audio</PanelTitle>
-              <div style={{ fontSize: 12, color: '#1B2838', wordBreak: 'break-all', marginBottom: 8 }}>
+              <div className="text-xs text-ink break-all mb-2">
                 {call.audio_original_name}
               </div>
-              {audioUrl && <audio controls src={audioUrl} style={{ width: '100%' }} />}
+              {audioUrl && <audio controls src={audioUrl} className="w-full" />}
             </div>
           )}
 
-          <div style={panel}>
+          <div className={panelClass}>
             <PanelTitle>Brand Profile extraction</PanelTitle>
-            {extractError && <div style={errorBox}>{extractError}</div>}
+            {extractError && <ErrorBox>{extractError}</ErrorBox>}
             {!extraction && !transcript.trim() && (
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 10 }}>
+              <div className="text-xs text-ink-faint mb-2.5">
                 Paste a transcript first, then extract.
               </div>
             )}
             {extraction && (
-              <div style={{ marginBottom: 10, fontSize: 12, color: '#64748B' }}>
+              <div className="mb-2.5 text-xs text-ink-muted">
                 <div>{extraction.completion_percent}% complete</div>
                 <div>Extracted {new Date(extraction.extracted_at).toLocaleString()}</div>
                 <div>Review: {call.review_status}</div>
               </div>
             )}
-            <button
+            <PrimaryButton
               onClick={extract}
               disabled={extracting || !transcript.trim()}
-              style={primaryBtn(extracting || !transcript.trim())}
+              className="w-full"
             >
               {extracting ? 'Extracting…' : extraction ? 'Re-extract' : 'Extract Brand Profile'}
-            </button>
+            </PrimaryButton>
             {extraction && (
-              <button
+              <SecondaryButton
                 onClick={openApplyModal}
                 disabled={applying || dirty}
-                style={{ ...secondaryBtn, marginTop: 8, width: '100%' }}
                 title={dirty ? 'Save your transcript edits first' : ''}
+                className="mt-2 w-full"
               >
                 {applying ? 'Applying…' : 'Apply to client'}
-              </button>
+              </SecondaryButton>
             )}
           </div>
 
-          <div style={panel}>
+          <div className={panelClass}>
             <PanelTitle>Metadata</PanelTitle>
-            <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.7 }}>
+            <div className="text-xs text-ink-muted leading-loose">
               <div>Created: {new Date(call.created_at).toLocaleString()}</div>
               <div>Updated: {new Date(call.updated_at).toLocaleString()}</div>
             </div>
@@ -289,32 +284,8 @@ export default function CallDetailView({ initialCall }: { initialCall: any }) {
   );
 }
 
-const panel: React.CSSProperties = {
-  background: '#fff', border: '1px solid #E2E6EB', borderRadius: 8, padding: 16,
-};
+const panelClass = 'bg-surface border border-edge rounded-lg p-4';
+
 function PanelTitle({ children }: { children: React.ReactNode }) {
-  return <h3 style={{ fontSize: 13, fontWeight: 700, marginTop: 0, marginBottom: 12 }}>{children}</h3>;
+  return <h3 className="text-[13px] font-bold mt-0 mb-3">{children}</h3>;
 }
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 10,
-};
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: '8px 16px', background: '#00D4AA', color: '#1B2838', border: 'none',
-  borderRadius: 4, fontSize: 13, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-const secondaryBtn: React.CSSProperties = {
-  padding: '8px 16px', background: '#fff', color: '#1B2838',
-  border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-};
-const renameInputStyle: React.CSSProperties = {
-  width: 110, padding: '4px 8px', border: '1px solid #E2E6EB',
-  borderRadius: 4, fontSize: 12,
-};
-const renameBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: '5px 12px', background: disabled ? '#E2E6EB' : '#1B2838',
-  color: disabled ? '#94a3b8' : '#fff', border: 'none', borderRadius: 4,
-  fontSize: 12, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer',
-});

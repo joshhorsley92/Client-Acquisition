@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
 import { mergeExtractionIntoClient } from '@/services/brand-profile-merge';
 import type { Choice } from '@/services/brand-profile-merge';
+import { audit } from '@/lib/audit';
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
@@ -72,6 +73,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       choices: Object.keys(choices).length ? choices : undefined,
     },
     created_by: auth.userId,
+  });
+
+  await audit({
+    userId: auth.userId,
+    action: 'apply_brand_profile',
+    resourceType: 'client',
+    resourceId: client.id,
+    metadata: {
+      call_id: call.id,
+      applied_count: merged.appliedPaths.length,
+      merged_count: merged.mergedPaths.length,
+      skipped_count: merged.skippedPaths.length,
+    },
+    request: req,
   });
 
   return NextResponse.json({

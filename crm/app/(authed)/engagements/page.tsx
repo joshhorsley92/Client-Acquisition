@@ -7,8 +7,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { StickyNote, Sparkles } from 'lucide-react';
 import { api } from '@/lib/api';
 import NewEngagementModal from '@/components/NewEngagementModal';
+import QuickNoteModal from '@/components/QuickNoteModal';
+import AutomationRunModal from '@/components/AutomationRunModal';
+import { ErrorBox, PrimaryButton } from '@/components/ui/Forms';
+import { Spinner } from '@/components/Skeleton';
+import { humanizeError } from '@/lib/humanize-error';
+import { cn } from '@/lib/cn';
 
 const STATUSES = ['new', 'working', 'won', 'lost'] as const;
 type Status = (typeof STATUSES)[number];
@@ -38,6 +45,8 @@ export default function EngagementsPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [err, setErr] = useState('');
+  const [noteFor, setNoteFor] = useState<{ engagementId: number; clientId: number; label: string } | null>(null);
+  const [automateFor, setAutomateFor] = useState<EngagementRow | null>(null);
 
   async function load() {
     setLoading(true); setErr('');
@@ -47,8 +56,8 @@ export default function EngagementsPage() {
       if (clientFilter) params.set('client_id', clientFilter);
       const data = await api.get<{ engagements: EngagementRow[] }>(`/api/engagements?${params}`);
       setEngagements(data.engagements || []);
-    } catch (e: any) {
-      setErr(e.message || 'Failed to load');
+    } catch (e: unknown) {
+      setErr(humanizeError(e, 'Failed to load engagements.'));
     } finally { setLoading(false); }
   }
 
@@ -60,47 +69,58 @@ export default function EngagementsPage() {
       .catch(() => {});
   }, []);
 
-  // Group by status for the kanban view (only when no status filter set)
   const grouped: Record<Status, EngagementRow[]> = {
     new: [], working: [], won: [], lost: [],
   };
   for (const e of engagements) grouped[e.status]?.push(e);
 
+  const hasFilters = Boolean(statusFilter || clientFilter);
+  const clearFilters = () => { setStatusFilter(''); setClientFilter(''); };
+  const selectClass = 'px-2.5 py-2 border border-edge rounded bg-surface text-[13px] min-w-[180px] focus:border-brand-mint focus:ring-1 focus:ring-brand-mint focus:outline-none';
+
   return (
     <div>
-      <div style={headerRow}>
-        <h1 style={h1}>Engagements</h1>
-        <button onClick={() => setShowNew(true)} style={primaryBtn}>+ New Engagement</button>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold m-0">Engagements</h1>
+        <PrimaryButton onClick={() => setShowNew(true)}>+ New Engagement</PrimaryButton>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} style={selectStyle}>
+      <div className="flex gap-2 items-center mb-4">
+        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className={selectClass}>
           <option value="">All clients</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} style={selectStyle}>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className={selectClass}>
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        {hasFilters && (
+          <button onClick={clearFilters} className="px-3 py-2 text-xs text-ink-muted hover:text-ink">
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {err && <div style={errorBox}>{err}</div>}
+      {err && <ErrorBox>{err}</ErrorBox>}
 
       {loading ? (
-        <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        <div className="text-ink-faint text-[13px] flex items-center gap-2">
+          <Spinner /> Loading engagements…
+        </div>
       ) : engagements.length === 0 ? (
-        <div style={{
-          background: '#fff', padding: 40, borderRadius: 8, border: '1px solid #E2E6EB',
-          textAlign: 'center', color: '#64748B', fontSize: 13,
-        }}>
-          No engagements yet. Hit <strong>+ New Engagement</strong> to start one.
+        <div className="bg-surface p-10 rounded-lg border border-edge text-center text-ink-muted text-[13px]">
+          {hasFilters ? (
+            <>No engagements match those filters. <button onClick={clearFilters} className="text-brand-mint hover:underline">Clear filters</button></>
+          ) : (
+            <>No engagements yet. Hit <strong>+ New Engagement</strong> to start one.</>
+          )}
         </div>
       ) : statusFilter ? (
-        <EngagementTable rows={engagements} />
+        <EngagementTable rows={engagements} onNote={setNoteFor} onAutomate={setAutomateFor} />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {STATUSES.map((s) => (
-            <Column key={s} status={s} rows={grouped[s]} />
+            <Column key={s} status={s} rows={grouped[s]} onNote={setNoteFor} onAutomate={setAutomateFor} />
           ))}
         </div>
       )}
@@ -112,75 +132,146 @@ export default function EngagementsPage() {
         onClose={() => setShowNew(false)}
         onCreated={() => { setShowNew(false); void load(); }}
       />
+      <QuickNoteModal
+        open={noteFor !== null}
+        onClose={() => setNoteFor(null)}
+        onSaved={() => void load()}
+        clientId={noteFor?.clientId ?? 0}
+        engagementId={noteFor?.engagementId}
+        contextLabel={noteFor?.label}
+      />
+      {automateFor && (
+        <AutomationRunModal
+          open={automateFor !== null}
+          onClose={() => setAutomateFor(null)}
+          engagement={{
+            id: automateFor.id,
+            client_id: automateFor.client_id,
+            client_name: automateFor.client_name,
+            package_type: automateFor.package_type,
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Column({ status, rows }: { status: Status; rows: EngagementRow[] }) {
+type NoteTarget = { engagementId: number; clientId: number; label: string };
+
+function Column({ status, rows, onNote, onAutomate }: { status: Status; rows: EngagementRow[]; onNote: (t: NoteTarget) => void; onAutomate: (r: EngagementRow) => void }) {
   return (
-    <div style={{ background: '#F7F8FA', borderRadius: 8, padding: 10 }}>
-      <div style={{
-        fontSize: 11, color: '#64748B', fontWeight: 700, textTransform: 'uppercase',
-        letterSpacing: 0.5, marginBottom: 8, padding: '0 4px',
-      }}>
+    <div className="bg-surface-page rounded-lg p-2.5">
+      <div className="text-[11px] text-ink-muted font-bold uppercase tracking-wider mb-2 px-1">
         {status} ({rows.length})
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.map((r) => <EngagementCard key={r.id} row={r} />)}
+      <div className="flex flex-col gap-2">
+        {rows.map((r) => <EngagementCard key={r.id} row={r} onNote={onNote} onAutomate={onAutomate} />)}
         {rows.length === 0 && (
-          <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', padding: 16 }}>
-            None
-          </div>
+          <div className="text-xs text-ink-faint text-center py-4">None</div>
         )}
       </div>
     </div>
   );
 }
 
-function EngagementCard({ row }: { row: EngagementRow }) {
+function EngagementCard({ row, onNote, onAutomate }: { row: EngagementRow; onNote: (t: NoteTarget) => void; onAutomate: (r: EngagementRow) => void }) {
+  const value = Number(row.closed_value) || Number(row.estimated_value) || 0;
   return (
-    <Link href={`/clients/${row.client_id}`} style={{
-      background: '#fff', borderRadius: 6, padding: 10, border: '1px solid #E2E6EB',
-      display: 'block', textDecoration: 'none',
-    }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#1B2838' }}>{row.client_name}</div>
-      <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
-        {row.package_type || 'Engagement'} #{row.id}
-      </div>
-      {(Number(row.closed_value) || Number(row.estimated_value) || 0) > 0 && (
-        <div style={{ fontSize: 12, color: '#1B2838', fontWeight: 600, marginTop: 4 }}>
-          ${(Number(row.closed_value) || Number(row.estimated_value) || 0).toLocaleString()}
+    <div className="group relative bg-surface rounded-md p-2.5 border border-edge hover:border-brand-mint hover:shadow-card transition-all">
+      <Link href={`/engagements/${row.id}`} className="block no-underline">
+        <div className="text-[13px] font-semibold text-ink pr-12">{row.client_name}</div>
+        <div className="text-[11px] text-ink-muted mt-1">
+          {row.package_type || 'Engagement'} #{row.id}
         </div>
-      )}
-    </Link>
+        {value > 0 && (
+          <div className="text-xs text-ink font-semibold mt-1">
+            ${value.toLocaleString()}
+          </div>
+        )}
+        {row.notes && (
+          <div className="text-[11px] text-ink-muted mt-1.5 line-clamp-2">
+            {row.notes}
+          </div>
+        )}
+      </Link>
+      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAutomate(row); }}
+          className="p-1 text-ink-faint hover:text-brand-mint"
+          title="Run automation"
+        >
+          <Sparkles size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNote({
+              engagementId: row.id,
+              clientId: row.client_id,
+              label: `${row.client_name || 'Client'} #${row.id}`,
+            });
+          }}
+          className="p-1 text-ink-faint hover:text-brand-mint"
+          title="Add note"
+        >
+          <StickyNote size={14} />
+        </button>
+      </div>
+    </div>
   );
 }
 
-function EngagementTable({ rows }: { rows: EngagementRow[] }) {
+function EngagementTable({ rows, onNote, onAutomate }: { rows: EngagementRow[]; onNote: (t: NoteTarget) => void; onAutomate: (r: EngagementRow) => void }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E2E6EB', overflow: 'hidden' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    <div className="bg-surface rounded-lg border border-edge overflow-hidden">
+      <table className="w-full border-collapse text-[13px]">
         <thead>
-          <tr style={{ background: '#F7F8FA', textAlign: 'left' }}>
+          <tr className="bg-surface-page text-left">
             <Th>Client</Th><Th>Package</Th><Th>Status</Th>
-            <Th>Source</Th><Th align="right">Value</Th><Th>Opened</Th>
+            <Th>Source</Th><Th align="right">Value</Th><Th>Opened</Th><Th></Th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} style={{ borderTop: '1px solid #F0F2F5' }}>
-              <td style={td}>
-                <Link href={`/clients/${r.client_id}`} style={{ color: '#1B2838', fontWeight: 600 }}>
+            <tr key={r.id} className="border-t border-surface-alt hover:bg-surface-page transition-colors">
+              <td className="px-3.5 py-2.5 text-ink">
+                <Link href={`/engagements/${r.id}`} className="text-ink font-semibold hover:text-brand-mint">
                   {r.client_name || `Client #${r.client_id}`}
                 </Link>
               </td>
-              <td style={td}>{r.package_type || '—'}</td>
-              <td style={td}>{r.status}</td>
-              <td style={td}>{r.source || '—'}</td>
-              <td style={{ ...td, textAlign: 'right' }}>
+              <td className="px-3.5 py-2.5 text-ink">{r.package_type || '—'}</td>
+              <td className="px-3.5 py-2.5 text-ink">{r.status}</td>
+              <td className="px-3.5 py-2.5 text-ink">{r.source || '—'}</td>
+              <td className="px-3.5 py-2.5 text-ink text-right">
                 ${Number(r.closed_value || r.estimated_value || 0).toLocaleString()}
               </td>
-              <td style={td}>{new Date(r.opened_at).toLocaleDateString()}</td>
+              <td className="px-3.5 py-2.5 text-ink">{new Date(r.opened_at).toLocaleDateString()}</td>
+              <td className="px-3.5 py-2.5 text-right">
+                <div className="flex justify-end items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onAutomate(r)}
+                    className="text-ink-faint hover:text-brand-mint p-1 rounded transition-colors"
+                    title="Run automation"
+                  >
+                    <Sparkles size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNote({
+                      engagementId: r.id,
+                      clientId: r.client_id,
+                      label: `${r.client_name || 'Client'} #${r.id}`,
+                    })}
+                    className="text-ink-faint hover:text-brand-mint p-1 rounded transition-colors"
+                    title="Add note"
+                  >
+                    <StickyNote size={14} />
+                  </button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -189,21 +280,15 @@ function EngagementTable({ rows }: { rows: EngagementRow[] }) {
   );
 }
 
-function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
-  return <th style={{ padding: '10px 14px', fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5, textAlign: align }}>{children}</th>;
+function Th({ children, align = 'left' }: { children?: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={cn(
+        'px-3.5 py-2.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider',
+        align === 'right' ? 'text-right' : 'text-left',
+      )}
+    >
+      {children}
+    </th>
+  );
 }
-const headerRow: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 };
-const h1: React.CSSProperties = { fontSize: 24, fontWeight: 700, margin: 0 };
-const primaryBtn: React.CSSProperties = {
-  background: '#00D4AA', color: '#1B2838', border: 'none', borderRadius: 6,
-  padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-};
-const selectStyle: React.CSSProperties = {
-  padding: '8px 10px', border: '1px solid #E2E6EB', borderRadius: 4,
-  background: '#fff', fontSize: 13, minWidth: 180,
-};
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
-};
-const td: React.CSSProperties = { padding: '10px 14px', color: '#1B2838' };

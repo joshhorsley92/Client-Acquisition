@@ -1,29 +1,20 @@
 'use client';
 
-// Minimal create-client form. Only `name` is required; everything else
-// optional. POSTs to /api/clients on submit.
+// Create-client form. Uses react-hook-form + the shared ClientCreateSchema
+// for validation, so the UI rules match the API rules exactly.
 
-import { useState, FormEvent } from 'react';
+import { useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import Modal from './Modal';
+import {
+  Field, Row, Input, Select, Textarea, Divider, ErrorBox,
+  PrimaryButton, SecondaryButton,
+} from './ui/Forms';
 import { api } from '@/lib/api';
-
-interface FormState {
-  name: string;
-  website: string;
-  industry: string;
-  location: string;
-  type: string;
-  primary_contact_name: string;
-  email: string;
-  phone: string;
-  role: string;
-  notes: string;
-}
-
-const initial = (): FormState => ({
-  name: '', website: '', industry: '', location: '', type: '',
-  primary_contact_name: '', email: '', phone: '', role: '', notes: '',
-});
+import { toast } from '@/lib/toast';
+import { humanizeError } from '@/lib/humanize-error';
+import { ClientCreateSchema, type ClientCreateInput } from '@/lib/schemas';
 
 export default function NewClientModal({
   open, onClose, onCreated,
@@ -32,129 +23,102 @@ export default function NewClientModal({
   onClose: () => void;
   onCreated: (client: any) => void;
 }) {
-  const [form, setForm] = useState<FormState>(initial);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const {
+    register, handleSubmit, reset, formState: { errors, isSubmitting },
+    setError, clearErrors,
+  } = useForm<ClientCreateInput>({
+    resolver: zodResolver(ClientCreateSchema),
+    defaultValues: { name: '' },
+  });
 
-  const handleClose = () => {
-    if (submitting) return;
-    setForm(initial());
-    setError('');
-    onClose();
-  };
+  // Reset the form whenever the modal closes — keep stale state out.
+  useEffect(() => { if (!open) reset(); }, [open, reset]);
 
-  const setField = (k: keyof FormState) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim()) { setError('Name is required'); return; }
-    setError(''); setSubmitting(true);
+  const onSubmit = handleSubmit(async (data) => {
+    clearErrors('root');
     try {
-      const payload: Record<string, any> = {};
-      for (const [k, v] of Object.entries(form)) {
-        if (v && String(v).trim()) payload[k] = String(v).trim();
-      }
-      const { client } = await api.post<{ client: any }>('/api/clients', payload);
-      setForm(initial());
+      const { client } = await api.post<{ client: any }>('/api/clients', data);
+      toast.success(`Created ${client.name}.`);
       onCreated(client);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create');
-    } finally {
-      setSubmitting(false);
+    } catch (err: unknown) {
+      const message = humanizeError(err, 'Failed to create client.');
+      setError('root', { message });
+      toast.error(message);
     }
-  }
+  });
 
   return (
-    <Modal open={open} onClose={handleClose} title="New Client" width={520}>
-      {error && <div style={errorBox}>{error}</div>}
-      <form onSubmit={submit}>
-        <Field label="Name" required>
-          <input style={input} value={form.name} onChange={setField('name')} required />
+    <Modal
+      open={open}
+      onClose={isSubmitting ? undefined : onClose}
+      title="New Client"
+      width={520}
+    >
+      {errors.root?.message && <ErrorBox>{errors.root.message}</ErrorBox>}
+      <form onSubmit={onSubmit}>
+        <Field label="Name" required error={errors.name?.message}>
+          <Input
+            {...register('name')}
+            aria-invalid={errors.name ? 'true' : 'false'}
+            autoFocus
+          />
         </Field>
         <Row>
-          <Field label="Website">
-            <input style={input} value={form.website} onChange={setField('website')} placeholder="https://..." />
+          <Field label="Website" error={errors.website?.message}>
+            <Input
+              {...register('website')}
+              placeholder="https://..."
+              aria-invalid={errors.website ? 'true' : 'false'}
+            />
           </Field>
           <Field label="Industry">
-            <input style={input} value={form.industry} onChange={setField('industry')} />
+            <Input {...register('industry')} />
           </Field>
         </Row>
         <Row>
           <Field label="Location">
-            <input style={input} value={form.location} onChange={setField('location')} placeholder="City, State" />
+            <Input {...register('location')} placeholder="City, State" />
           </Field>
           <Field label="Type">
-            <select style={input} value={form.type} onChange={setField('type')}>
+            <Select {...register('type')}>
               <option value="">—</option>
               <option value="B2B">B2B</option>
               <option value="B2C">B2C</option>
-            </select>
+            </Select>
           </Field>
         </Row>
-        <hr style={hr} />
+        <Divider />
         <Field label="Primary contact name">
-          <input style={input} value={form.primary_contact_name} onChange={setField('primary_contact_name')} />
+          <Input {...register('primary_contact_name')} />
         </Field>
         <Row>
-          <Field label="Email">
-            <input style={input} type="email" value={form.email} onChange={setField('email')} />
+          <Field label="Email" error={errors.email?.message}>
+            <Input
+              type="email"
+              {...register('email')}
+              aria-invalid={errors.email ? 'true' : 'false'}
+            />
           </Field>
           <Field label="Phone">
-            <input style={input} value={form.phone} onChange={setField('phone')} />
+            <Input {...register('phone')} />
           </Field>
         </Row>
         <Field label="Role">
-          <input style={input} value={form.role} onChange={setField('role')} placeholder="Owner, Marketing Manager, ..." />
+          <Input {...register('role')} placeholder="Owner, Marketing Manager, ..." />
         </Field>
         <Field label="Notes">
-          <textarea
-            style={{ ...input, minHeight: 60, resize: 'vertical' }}
-            value={form.notes} onChange={setField('notes')}
-          />
+          <Textarea {...register('notes')} />
         </Field>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button type="button" onClick={handleClose} disabled={submitting} style={secondary}>Cancel</button>
-          <button type="submit" disabled={submitting || !form.name.trim()} style={primary(submitting || !form.name.trim())}>
-            {submitting ? 'Creating…' : 'Create client'}
-          </button>
+        <div className="flex justify-end gap-2 mt-4">
+          <SecondaryButton type="button" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating…' : 'Create client'}
+          </PrimaryButton>
         </div>
       </form>
     </Modal>
   );
 }
-
-function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>{children}</div>;
-}
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <label style={{ display: 'block', fontSize: 12, color: '#64748B', marginBottom: 4 }}>
-        {label}{required && <span style={{ color: '#dc2626' }}> *</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-const input: React.CSSProperties = {
-  width: '100%', padding: '8px 10px', border: '1px solid #E2E6EB',
-  borderRadius: 4, fontSize: 13, boxSizing: 'border-box', fontFamily: 'inherit',
-};
-const hr: React.CSSProperties = { border: 'none', borderTop: '1px solid #F0F2F5', margin: '14px 0' };
-const errorBox: React.CSSProperties = {
-  background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991b1b',
-  padding: '8px 12px', borderRadius: 4, fontSize: 12, marginBottom: 12,
-};
-const primary = (disabled: boolean): React.CSSProperties => ({
-  padding: '8px 16px', background: '#00D4AA', color: '#1B2838', border: 'none',
-  borderRadius: 4, fontSize: 13, fontWeight: 600,
-  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
-});
-const secondary: React.CSSProperties = {
-  padding: '8px 16px', background: '#fff', color: '#1B2838',
-  border: '1px solid #E2E6EB', borderRadius: 4, fontSize: 13, fontWeight: 600,
-  cursor: 'pointer',
-};

@@ -16,6 +16,7 @@ export default async function ReportsPage() {
     { count: lostCount },
     { data: statusRows },
     { data: sourceRows },
+    { data: lostReasonRows },
     { data: monthlyRows },
     { data: clientRevenueRows },
   ] = await Promise.all([
@@ -25,6 +26,7 @@ export default async function ReportsPage() {
     supabase.from('engagements').select('*', { count: 'exact', head: true }).eq('status', 'lost'),
     supabase.from('engagements').select('status'),
     supabase.from('engagements').select('source').not('source', 'is', null),
+    supabase.from('engagements').select('lost_reason').eq('status', 'lost').not('lost_reason', 'is', null),
     supabase.from('engagements').select('closed_at, closed_value, estimated_value').eq('status', 'won').not('closed_at', 'is', null),
     supabase.from('clients_with_rollups').select('id, name, lifetime_revenue, won_engagements, open_engagements').order('lifetime_revenue', { ascending: false }).limit(20),
   ]);
@@ -42,13 +44,14 @@ export default async function ReportsPage() {
 
   const statusTally = tally(statusRows, (r: any) => r.status);
   const sourceTally = tally(sourceRows, (r: any) => r.source);
+  const lostReasonTally = tally(lostReasonRows, (r: any) => r.lost_reason);
   const monthly = bucketMonthly(monthlyRows || []);
 
   return (
     <div>
-      <h1 style={h1}>Reports</h1>
+      <h1 className="text-2xl font-bold m-0 mb-4">Reports</h1>
 
-      <div style={kpiGrid}>
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <KpiTile label="Clients" value={String(clientCount || 0)} />
         <KpiTile label="Open engagements" value={String(openEng || 0)} />
         <KpiTile label="Pipeline value" value={fmtMoney(pipelineValue)} />
@@ -57,23 +60,30 @@ export default async function ReportsPage() {
         <KpiTile label="Avg cycle" value={avgCycle != null ? `${avgCycle}d` : '—'} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ReportPanel title="Engagements by status">
           <SimpleTable rows={statusTally.map(([k, v]) => ({ label: k, value: v }))} />
         </ReportPanel>
         <ReportPanel title="Engagements by source">
           {sourceTally.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>No source data yet.</div>
+            <div className="text-xs text-ink-faint">No source data yet.</div>
           ) : (
             <SimpleTable rows={sourceTally.map(([k, v]) => ({ label: k, value: v }))} />
           )}
         </ReportPanel>
+        <ReportPanel title="Why we lost">
+          {lostReasonTally.length === 0 ? (
+            <div className="text-xs text-ink-faint">No lost engagements with reasons recorded yet.</div>
+          ) : (
+            <BarList rows={lostReasonTally.map(([k, v]) => ({ label: k, value: v }))} />
+          )}
+        </ReportPanel>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
         <ReportPanel title="Monthly closed-won revenue (last 12)">
           {monthly.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>No closed deals yet.</div>
+            <div className="text-xs text-ink-faint">No closed deals yet.</div>
           ) : (
             <SimpleTable rows={monthly.map(({ month, revenue, count }) => ({
               label: month, value: `${count} · ${fmtMoney(revenue)}`,
@@ -82,28 +92,28 @@ export default async function ReportsPage() {
         </ReportPanel>
         <ReportPanel title="Top clients by lifetime revenue">
           {(clientRevenueRows || []).length === 0 ? (
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>No revenue yet.</div>
+            <div className="text-xs text-ink-faint">No revenue yet.</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table className="w-full border-collapse text-[13px]">
               <thead>
-                <tr style={{ textAlign: 'left' }}>
-                  <th style={th}>Client</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Won</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Open</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Lifetime $</th>
+                <tr className="text-left">
+                  <th className="px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider">Client</th>
+                  <th className="px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider text-right">Won</th>
+                  <th className="px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider text-right">Open</th>
+                  <th className="px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted uppercase tracking-wider text-right">Lifetime $</th>
                 </tr>
               </thead>
               <tbody>
                 {(clientRevenueRows || []).map((r: any) => (
-                  <tr key={r.id} style={{ borderTop: '1px solid #F0F2F5' }}>
-                    <td style={td}>
-                      <Link href={`/clients/${r.id}`} style={{ color: '#1B2838', fontWeight: 600 }}>
+                  <tr key={r.id} className="border-t border-surface-alt">
+                    <td className="px-2.5 py-1.5">
+                      <Link href={`/clients/${r.id}`} className="text-ink font-semibold hover:text-brand-mint">
                         {r.name}
                       </Link>
                     </td>
-                    <td style={{ ...td, textAlign: 'right' }}>{r.won_engagements ?? 0}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>{r.open_engagements ?? 0}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>{fmtMoney(Number(r.lifetime_revenue) || 0)}</td>
+                    <td className="px-2.5 py-1.5 text-ink text-right">{r.won_engagements ?? 0}</td>
+                    <td className="px-2.5 py-1.5 text-ink text-right">{r.open_engagements ?? 0}</td>
+                    <td className="px-2.5 py-1.5 text-ink text-right">{fmtMoney(Number(r.lifetime_revenue) || 0)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -145,16 +155,16 @@ function fmtMoney(n: number) {
 
 function KpiTile({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #E2E6EB' }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: '#1B2838' }}>{value}</div>
-      <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{label}</div>
+    <div className="bg-surface rounded-lg p-4 border border-edge">
+      <div className="text-[22px] font-bold text-ink">{value}</div>
+      <div className="text-[11px] text-ink-muted mt-1">{label}</div>
     </div>
   );
 }
 function ReportPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #E2E6EB' }}>
-      <h2 style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 0, marginBottom: 12 }}>
+    <div className="bg-surface rounded-lg p-4 border border-edge">
+      <h2 className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mt-0 mb-3">
         {title}
       </h2>
       {children}
@@ -163,23 +173,41 @@ function ReportPanel({ title, children }: { title: string; children: React.React
 }
 function SimpleTable({ rows }: { rows: Array<{ label: string; value: string | number }> }) {
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 13 }}>
+    <ul className="list-none p-0 m-0 text-[13px]">
       {rows.map((r, i) => (
-        <li key={i} style={{
-          display: 'flex', justifyContent: 'space-between', padding: '6px 0',
-          borderTop: i === 0 ? 'none' : '1px solid #F0F2F5',
-        }}>
-          <span style={{ color: '#1B2838' }}>{r.label}</span>
-          <span style={{ color: '#64748B', fontWeight: 600 }}>{r.value}</span>
+        <li
+          key={i}
+          className={`flex justify-between py-1.5 ${i === 0 ? '' : 'border-t border-surface-alt'}`}
+        >
+          <span className="text-ink">{r.label}</span>
+          <span className="text-ink-muted font-semibold">{r.value}</span>
         </li>
       ))}
     </ul>
   );
 }
 
-const h1: React.CSSProperties = { fontSize: 24, fontWeight: 700, margin: '0 0 16px 0' };
-const kpiGrid: React.CSSProperties = {
-  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16,
-};
-const th: React.CSSProperties = { padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 };
-const td: React.CSSProperties = { padding: '6px 10px', color: '#1B2838' };
+// Bar list — same shape as SimpleTable but each row gets a horizontal
+// bar showing relative magnitude. Useful when the comparison matters
+// more than the absolute count.
+function BarList({ rows }: { rows: Array<{ label: string; value: number }> }) {
+  const max = Math.max(...rows.map((r) => r.value), 1);
+  return (
+    <ul className="list-none p-0 m-0 text-[13px] space-y-2">
+      {rows.map((r, i) => (
+        <li key={i}>
+          <div className="flex justify-between text-ink mb-0.5">
+            <span className="capitalize">{r.label}</span>
+            <span className="text-ink-muted font-semibold tabular-nums">{r.value}</span>
+          </div>
+          <div className="h-1.5 bg-surface-alt rounded-full overflow-hidden">
+            <div
+              className="h-full bg-danger rounded-full"
+              style={{ width: `${Math.round((r.value / max) * 100)}%` }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}

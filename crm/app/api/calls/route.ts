@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
+import { CallCreateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
   const result = await requireAuth();
@@ -22,6 +24,10 @@ export async function GET(req: NextRequest) {
   if (sp.get('client_id')) query = query.eq('client_id', sp.get('client_id'));
   if (sp.get('engagement_id')) query = query.eq('engagement_id', sp.get('engagement_id'));
   if (sp.get('review_status')) query = query.eq('review_status', sp.get('review_status'));
+  // Free-text search inside the transcript (ILIKE — internal CRM scale,
+  // <10k rows expected). Promote to to_tsvector if/when this gets slow.
+  const q = sp.get('q')?.trim();
+  if (q) query = query.ilike('transcript', `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -34,18 +40,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ calls });
 }
 
-const CreateBody = z.object({
-  client_id: z.union([z.number(), z.string()]),
-  engagement_id: z.union([z.number(), z.string()]).nullish(),
-  call_date: z.string().nullish(),
-  duration_minutes: z.number().nullish(),
-  transcript: z.string().nullish(),
-  notes: z.string().nullish(),
-  // Audio fields are populated via the signed-URL flow (Phase E). The
-  // frontend uploads to Storage first, then posts the resulting path here.
+// Server adds audio metadata fields; the client form schema (lib/schemas) doesn't
+// include them — audio uploads via the signed-URL flow append them at submit.
+const ServerCallCreate = CallCreateSchema.extend({
   audio_storage_path: z.string().nullish(),
   audio_original_name: z.string().nullish(),
-  audio_size_bytes: z.number().nullish(),
+  audio_size_bytes: z.coerce.number().nullish(),
 });
 
 export async function POST(req: NextRequest) {
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   const { auth, supabase } = result;
 
   let body;
-  try { body = CreateBody.parse(await req.json()); }
+  try { body = ServerCallCreate.parse(await req.json()); }
   catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid body' }, { status: 400 });
   }
@@ -97,6 +97,20 @@ export async function POST(req: NextRequest) {
     .select('*')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'create',
+    resourceType: 'call',
+    resourceId: data.id,
+    metadata: {
+      client_id: body.client_id,
+      engagement_id: body.engagement_id ?? null,
+      has_transcript: Boolean(body.transcript?.trim()),
+      has_audio: Boolean(body.audio_storage_path),
+    },
+    request: req,
+  });
 
   return NextResponse.json({ call: data }, { status: 201 });
 }

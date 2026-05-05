@@ -4,27 +4,22 @@
 // in the background and writes the output back via the service-role client.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase-server';
 import { isConfigured, runPrompt } from '@/services/claude-api';
 import { buildPrompt } from '@/services/ai-prompts';
 import { getLatestBrandProfile } from '@/services/brand-profile-loader';
 import { AUTOMATIONS } from '@/services/automation-registry';
-
-const Body = z.object({
-  automation: z.string(),
-  client_id: z.union([z.number(), z.string()]),
-  engagement_id: z.union([z.number(), z.string()]).nullish(),
-});
+import { audit } from '@/lib/audit';
+import { AutomationRunSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest) {
   const result = await requireAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
 
   let body;
-  try { body = Body.parse(await req.json()); }
+  try { body = AutomationRunSchema.parse(await req.json()); }
   catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid body' }, { status: 400 });
   }
@@ -93,6 +88,20 @@ export async function POST(req: NextRequest) {
     engagementId: body.engagement_id ?? null,
     jobType: meta.jobType,
     brandSource,
+  });
+
+  await audit({
+    userId: auth.userId,
+    action: 'run_automation',
+    resourceType: 'automation_job',
+    resourceId: job.id,
+    metadata: {
+      automation: body.automation,
+      client_id: body.client_id,
+      engagement_id: body.engagement_id ?? null,
+      brand_profile_source: brandSource,
+    },
+    request: req,
   });
 
   return NextResponse.json({

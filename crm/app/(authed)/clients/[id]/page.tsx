@@ -26,7 +26,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div>
-      <Link href="/clients" style={{ color: '#00D4AA', fontSize: 13, textDecoration: 'none' }}>
+      <Link href="/clients" className="text-brand-mint text-[13px] hover:underline">
         ← Back to clients
       </Link>
       <ClientDetailView

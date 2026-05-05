@@ -1,11 +1,12 @@
-// GET   /api/integrations/:type
+// GET   /api/integrations/:type — admin-only (config may contain secrets)
 // PATCH /api/integrations/:type — admin-only, update config + enabled
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireAdminAuth, isAuthError } from '@/lib/api-auth';
+import { requireAdminAuth, isAuthError } from '@/lib/api-auth';
+import { audit } from '@/lib/audit';
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ type: string }> }) {
-  const result = await requireAuth();
+  const result = await requireAdminAuth();
   if (isAuthError(result)) return result;
   const { supabase } = result;
   const { type } = await ctx.params;
@@ -19,7 +20,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ type: stri
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ type: string }> }) {
   const result = await requireAdminAuth();
   if (isAuthError(result)) return result;
-  const { supabase } = result;
+  const { auth, supabase } = result;
   const { type } = await ctx.params;
 
   const body = await req.json();
@@ -38,5 +39,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ type: str
     .select('*')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await audit({
+    userId: auth.userId,
+    action: 'update',
+    resourceType: 'integration',
+    resourceId: type,
+    metadata: {
+      fields: Object.keys(updates),
+      enabled: 'enabled' in updates ? updates.enabled : undefined,
+    },
+    request: req,
+  });
+
   return NextResponse.json({ integration: data });
 }
