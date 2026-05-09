@@ -7,15 +7,20 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { StickyNote, Sparkles } from 'lucide-react';
+import { StickyNote, Sparkles, GripVertical } from 'lucide-react';
 import { api } from '@/lib/api';
 import NewEngagementModal from '@/components/NewEngagementModal';
 import QuickNoteModal from '@/components/QuickNoteModal';
 import AutomationRunModal from '@/components/AutomationRunModal';
 import { ErrorBox, PrimaryButton } from '@/components/ui/Forms';
 import { Spinner } from '@/components/Skeleton';
+import { toast } from '@/lib/toast';
 import { humanizeError } from '@/lib/humanize-error';
 import { cn } from '@/lib/cn';
+import {
+  formatPackages, formatPricingChip, engagementTitle, SOURCE_LABELS,
+  type SourceSlug, type EngagementPackage,
+} from '@/lib/engagement-options';
 
 const STATUSES = ['new', 'working', 'won', 'lost'] as const;
 type Status = (typeof STATUSES)[number];
@@ -25,9 +30,12 @@ interface EngagementRow {
   client_id: number;
   client_name?: string;
   status: Status;
-  package_type?: string | null;
+  title?: string | null;
+  packages?: Array<EngagementPackage | string> | null;
   estimated_value?: number;
   closed_value?: number | null;
+  monthly_recurring_value?: number | null;
+  closed_monthly_value?: number | null;
   source?: string | null;
   notes?: string | null;
   opened_at: string;
@@ -47,6 +55,8 @@ export default function EngagementsPage() {
   const [err, setErr] = useState('');
   const [noteFor, setNoteFor] = useState<{ engagementId: number; clientId: number; label: string } | null>(null);
   const [automateFor, setAutomateFor] = useState<EngagementRow | null>(null);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<Status | null>(null);
 
   async function load() {
     setLoading(true); setErr('');
@@ -63,11 +73,43 @@ export default function EngagementsPage() {
 
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [statusFilter, clientFilter]);
 
-  useEffect(() => {
-    api.get<{ clients: any[] }>('/api/clients?sort_by=name&sort_dir=asc')
-      .then((d) => setClients((d.clients || []).map((c) => ({ id: c.id, name: c.name }))))
-      .catch(() => {});
-  }, []);
+  // Drag-and-drop status change. Optimistically moves the card into the
+  // target column and PATCHes the engagement; reverts on failure.
+  // Special-cases the 'lost' transition because the API requires a
+  // lost_reason — if none is set yet, we surface a clear toast instead
+  // of leaving the user wondering why the move silently failed.
+  async function moveEngagement(id: number, target: Status) {
+    const original = engagements;
+    const current = original.find((e) => e.id === id);
+    if (!current || current.status === target) return;
+
+    // Optimistic update.
+    setEngagements((prev) => prev.map((e) => (e.id === id ? { ...e, status: target } : e)));
+
+    try {
+      await api.patch(`/api/engagements/${id}`, { status: target });
+    } catch (err: unknown) {
+      // Revert + tell the user what went wrong.
+      setEngagements(original);
+      const msg = humanizeError(err, 'Failed to move engagement.');
+      // The API surfaces "lost_reason is required when closing as lost"
+      // — point the user at the engagement detail to fix it.
+      if (target === 'lost' && /lost_reason/i.test(msg)) {
+        toast.error('Open the engagement and set a Lost reason before moving it to Lost.');
+      } else {
+        toast.error(msg);
+      }
+    }
+  }
+
+  async function loadClients() {
+    try {
+      const d = await api.get<{ clients: any[] }>('/api/clients?sort_by=name&sort_dir=asc');
+      setClients((d.clients || []).map((c) => ({ id: c.id, name: c.name })));
+    } catch { /* silent — clients dropdown just stays empty */ }
+  }
+
+  useEffect(() => { void loadClients(); }, []);
 
   const grouped: Record<Status, EngagementRow[]> = {
     new: [], working: [], won: [], lost: [],
@@ -120,7 +162,24 @@ export default function EngagementsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {STATUSES.map((s) => (
-            <Column key={s} status={s} rows={grouped[s]} onNote={setNoteFor} onAutomate={setAutomateFor} />
+            <Column
+              key={s}
+              status={s}
+              rows={grouped[s]}
+              onNote={setNoteFor}
+              onAutomate={setAutomateFor}
+              draggingId={draggingId}
+              isDragOver={dragOverStatus === s}
+              onDragStart={(id) => setDraggingId(id)}
+              onDragEnd={() => { setDraggingId(null); setDragOverStatus(null); }}
+              onDragEnterColumn={() => setDragOverStatus(s)}
+              onDragLeaveColumn={() => setDragOverStatus((cur) => (cur === s ? null : cur))}
+              onDropToColumn={() => {
+                setDragOverStatus(null);
+                if (draggingId != null) void moveEngagement(draggingId, s);
+                setDraggingId(null);
+              }}
+            />
           ))}
         </div>
       )}
@@ -130,7 +189,7 @@ export default function EngagementsPage() {
         clients={clients}
         defaultClientId={clientFilter ? Number(clientFilter) : undefined}
         onClose={() => setShowNew(false)}
-        onCreated={() => { setShowNew(false); void load(); }}
+        onCreated={() => { setShowNew(false); void load(); void loadClients(); }}
       />
       <QuickNoteModal
         open={noteFor !== null}
@@ -148,7 +207,7 @@ export default function EngagementsPage() {
             id: automateFor.id,
             client_id: automateFor.client_id,
             client_name: automateFor.client_name,
-            package_type: automateFor.package_type,
+            packages: automateFor.packages ?? [],
           }}
         />
       )}
@@ -158,35 +217,125 @@ export default function EngagementsPage() {
 
 type NoteTarget = { engagementId: number; clientId: number; label: string };
 
-function Column({ status, rows, onNote, onAutomate }: { status: Status; rows: EngagementRow[]; onNote: (t: NoteTarget) => void; onAutomate: (r: EngagementRow) => void }) {
+function Column({
+  status, rows, onNote, onAutomate,
+  draggingId, isDragOver,
+  onDragStart, onDragEnd,
+  onDragEnterColumn, onDragLeaveColumn, onDropToColumn,
+}: {
+  status: Status;
+  rows: EngagementRow[];
+  onNote: (t: NoteTarget) => void;
+  onAutomate: (r: EngagementRow) => void;
+  draggingId: number | null;
+  isDragOver: boolean;
+  onDragStart: (id: number) => void;
+  onDragEnd: () => void;
+  onDragEnterColumn: () => void;
+  onDragLeaveColumn: () => void;
+  onDropToColumn: () => void;
+}) {
   return (
-    <div className="bg-surface-page rounded-lg p-2.5">
+    <div
+      onDragOver={(e) => {
+        // Required for drop to fire. Only accept if a card is actually
+        // being dragged (not arbitrary OS drags).
+        if (draggingId != null) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      }}
+      onDragEnter={(e) => {
+        if (draggingId != null) {
+          e.preventDefault();
+          onDragEnterColumn();
+        }
+      }}
+      onDragLeave={(e) => {
+        // dragLeave fires for child enters too; ignore unless we left
+        // the column container itself.
+        if (e.currentTarget === e.target) onDragLeaveColumn();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDropToColumn();
+      }}
+      className={cn(
+        'bg-surface-page rounded-lg p-2.5 transition-colors',
+        isDragOver && 'ring-2 ring-brand-mint bg-brand-mint/5',
+      )}
+    >
       <div className="text-[11px] text-ink-muted font-bold uppercase tracking-wider mb-2 px-1">
         {status} ({rows.length})
       </div>
       <div className="flex flex-col gap-2">
-        {rows.map((r) => <EngagementCard key={r.id} row={r} onNote={onNote} onAutomate={onAutomate} />)}
+        {rows.map((r) => (
+          <EngagementCard
+            key={r.id}
+            row={r}
+            onNote={onNote}
+            onAutomate={onAutomate}
+            isDragging={draggingId === r.id}
+            onDragStart={() => onDragStart(r.id)}
+            onDragEnd={onDragEnd}
+          />
+        ))}
         {rows.length === 0 && (
-          <div className="text-xs text-ink-faint text-center py-4">None</div>
+          <div className="text-xs text-ink-faint text-center py-4">
+            {isDragOver ? 'Drop here' : 'None'}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function EngagementCard({ row, onNote, onAutomate }: { row: EngagementRow; onNote: (t: NoteTarget) => void; onAutomate: (r: EngagementRow) => void }) {
-  const value = Number(row.closed_value) || Number(row.estimated_value) || 0;
+function EngagementCard({
+  row, onNote, onAutomate,
+  isDragging, onDragStart, onDragEnd,
+}: {
+  row: EngagementRow;
+  onNote: (t: NoteTarget) => void;
+  onAutomate: (r: EngagementRow) => void;
+  isDragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  const oneTime = Number(row.closed_value) || Number(row.estimated_value) || 0;
+  const mrr = Number(row.closed_monthly_value) || Number(row.monthly_recurring_value) || 0;
+  const valueChip = formatPricingChip({ one_time: oneTime, monthly: mrr });
+  const titleLabel = engagementTitle(row);
   return (
-    <div className="group relative bg-surface rounded-md p-2.5 border border-edge hover:border-brand-mint hover:shadow-card transition-all">
-      <Link href={`/engagements/${row.id}`} className="block no-underline">
+    <div
+      draggable
+      onDragStart={(e) => {
+        // Required for Firefox to start the drag.
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(row.id));
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        'group relative bg-surface rounded-md p-2.5 border border-edge transition-all cursor-grab active:cursor-grabbing',
+        isDragging
+          ? 'opacity-40 border-brand-mint ring-2 ring-brand-mint/40'
+          : 'hover:border-brand-mint hover:shadow-card',
+      )}
+    >
+      <GripVertical
+        size={12}
+        className="absolute top-2.5 left-1 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity"
+        aria-hidden
+      />
+      <Link href={`/engagements/${row.id}`} className="block no-underline pl-2.5" draggable={false}>
         <div className="text-[13px] font-semibold text-ink pr-12">{row.client_name}</div>
-        <div className="text-[11px] text-ink-muted mt-1">
-          {row.package_type || 'Engagement'} #{row.id}
+        <div className="text-[11px] text-ink-muted mt-1" title={titleLabel || undefined}>
+          {titleLabel
+            ? <span className="line-clamp-1">{titleLabel}</span>
+            : <>Engagement #{row.id}</>}
         </div>
-        {value > 0 && (
-          <div className="text-xs text-ink font-semibold mt-1">
-            ${value.toLocaleString()}
-          </div>
+        {valueChip && (
+          <div className="text-xs text-ink font-semibold mt-1">{valueChip}</div>
         )}
         {row.notes && (
           <div className="text-[11px] text-ink-muted mt-1.5 line-clamp-2">
@@ -241,11 +390,22 @@ function EngagementTable({ rows, onNote, onAutomate }: { rows: EngagementRow[]; 
                   {r.client_name || `Client #${r.client_id}`}
                 </Link>
               </td>
-              <td className="px-3.5 py-2.5 text-ink">{r.package_type || '—'}</td>
+              <td className="px-3.5 py-2.5 text-ink">
+                <span title={engagementTitle(r) || undefined}>
+                  {engagementTitle(r) || '—'}
+                </span>
+              </td>
               <td className="px-3.5 py-2.5 text-ink">{r.status}</td>
-              <td className="px-3.5 py-2.5 text-ink">{r.source || '—'}</td>
+              <td className="px-3.5 py-2.5 text-ink">
+                {r.source ? (SOURCE_LABELS[r.source as SourceSlug] || r.source) : '—'}
+              </td>
               <td className="px-3.5 py-2.5 text-ink text-right">
-                ${Number(r.closed_value || r.estimated_value || 0).toLocaleString()}
+                {(() => {
+                  const ot = Number(r.closed_value || r.estimated_value || 0);
+                  const mo = Number(r.closed_monthly_value || r.monthly_recurring_value || 0);
+                  const chip = formatPricingChip({ one_time: ot, monthly: mo });
+                  return chip || '—';
+                })()}
               </td>
               <td className="px-3.5 py-2.5 text-ink">{new Date(r.opened_at).toLocaleDateString()}</td>
               <td className="px-3.5 py-2.5 text-right">

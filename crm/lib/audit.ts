@@ -21,7 +21,10 @@ export type AuditAction =
   | 'recompute_fit_score'
   | 'update_icp'
   | 'create_user'
-  | 'delete_user';
+  | 'delete_user'
+  | 'run_lead_discovery'
+  | 'promote_lead_candidate'
+  | 'dismiss_lead_candidate';
 
 export type AuditResource =
   | 'client'
@@ -30,7 +33,9 @@ export type AuditResource =
   | 'automation_job'
   | 'user'
   | 'icp_config'
-  | 'integration';
+  | 'integration'
+  | 'scrape_job'
+  | 'lead_candidate';
 
 interface AuditEntry {
   userId: string;

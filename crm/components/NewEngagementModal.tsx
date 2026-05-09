@@ -1,11 +1,13 @@
 'use client';
 
-// New Engagement modal — minimal create form. Required: client_id.
-// Defaults to status='new'; everything else optional.
+// New Engagement modal — creates an engagement and (optionally) a brand-new
+// client inline. Required: client_id (or "+ New Client" + name). Defaults
+// status='new'.
+//
+// Multi-select packages (line items) feed proposal generation. Source enum
+// uses the post-2026-05 lead-channel taxonomy from engagement-options.ts.
 
-import { useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useEffect, useState } from 'react';
 import Modal from './Modal';
 import {
   Field, Row, Input, Select, Textarea, ErrorBox,
@@ -14,7 +16,13 @@ import {
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { humanizeError } from '@/lib/humanize-error';
-import { EngagementCreateSchema, type EngagementCreateInput } from '@/lib/schemas';
+import {
+  PACKAGE_SLUGS, PACKAGE_LABELS, type PackageSlug,
+  SOURCE_SLUGS, SOURCE_LABELS, type SourceSlug,
+  type EngagementPackage,
+} from '@/lib/engagement-options';
+
+const NEW_CLIENT_VALUE = '__new__';
 
 export default function NewEngagementModal({
   open, onClose, onCreated, clients, defaultClientId,
@@ -25,91 +33,205 @@ export default function NewEngagementModal({
   clients: Array<{ id: number; name: string }>;
   defaultClientId?: number;
 }) {
-  const {
-    register, handleSubmit, reset, formState: { errors, isSubmitting },
-    setError, clearErrors,
-  } = useForm<EngagementCreateInput>({
-    resolver: zodResolver(EngagementCreateSchema),
-    // RHF + zodResolver handles z.coerce.number() — passing the default as a
-    // number works, but the underlying <select> renders strings. Cast at submit.
-    defaultValues: { client_id: defaultClientId as any },
-  });
+  const [clientChoice, setClientChoice] = useState<string>(defaultClientId ? String(defaultClientId) : '');
+  const [newClientName, setNewClientName] = useState('');
+  const [packages, setPackages] = useState<Set<PackageSlug>>(new Set());
+  const [otherLabel, setOtherLabel] = useState('');
+  const [estimatedValue, setEstimatedValue] = useState('');
+  const [source, setSource] = useState<string>('');
+  const [sourceDetail, setSourceDetail] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
 
+  // Reset on open/close so a stale state doesn't bleed across uses.
   useEffect(() => {
-    if (!open) reset({ client_id: defaultClientId as any });
-  }, [open, defaultClientId, reset]);
+    if (open) {
+      setClientChoice(defaultClientId ? String(defaultClientId) : '');
+      setNewClientName('');
+      setPackages(new Set());
+      setOtherLabel('');
+      setEstimatedValue('');
+      setSource('');
+      setSourceDetail('');
+      setNotes('');
+      setErr('');
+    }
+  }, [open, defaultClientId]);
 
-  const onSubmit = handleSubmit(async (data) => {
-    clearErrors('root');
+  function togglePackage(slug: PackageSlug) {
+    setPackages((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr('');
+
+    if (!clientChoice) {
+      setErr('Pick a client (or choose "+ New Client").');
+      return;
+    }
+    if (clientChoice === NEW_CLIENT_VALUE && !newClientName.trim()) {
+      setErr('Enter a name for the new client.');
+      return;
+    }
+    if (packages.has('other') && !otherLabel.trim()) {
+      setErr('Tell us what "Other" is — that label becomes the engagement title.');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const { engagement } = await api.post<{ engagement: any }>('/api/engagements', data);
+      let clientId: number;
+
+      if (clientChoice === NEW_CLIENT_VALUE) {
+        // Create a placeholder client with just the name. Joe fills in the
+        // rest later (or hits Scrub website).
+        const { client: created } = await api.post<{ client: any }>('/api/clients', {
+          name: newClientName.trim(),
+        });
+        clientId = created.id;
+      } else {
+        clientId = Number(clientChoice);
+      }
+
+      const packagesPayload: EngagementPackage[] = [...packages].map((slug) => {
+        if (slug === 'other') return { slug: 'other', label: otherLabel.trim() };
+        return { slug };
+      });
+      const payload = {
+        client_id: clientId,
+        packages: packagesPayload,
+        source: source || undefined,
+        source_detail: sourceDetail || undefined,
+        estimated_value: estimatedValue ? Number(estimatedValue) : undefined,
+        notes: notes || undefined,
+      };
+
+      const { engagement } = await api.post<{ engagement: any }>('/api/engagements', payload);
       toast.success('Engagement created.');
       onCreated(engagement);
     } catch (err: unknown) {
       const message = humanizeError(err, 'Failed to create engagement.');
-      setError('root', { message });
+      setErr(message);
       toast.error(message);
+    } finally {
+      setSubmitting(false);
     }
-  });
+  }
+
+  const isNewClient = clientChoice === NEW_CLIENT_VALUE;
 
   return (
     <Modal
       open={open}
-      onClose={isSubmitting ? undefined : onClose}
+      onClose={submitting ? undefined : onClose}
       title="New Engagement"
-      width={480}
+      width={520}
     >
-      {errors.root?.message && <ErrorBox>{errors.root.message}</ErrorBox>}
-      <form onSubmit={onSubmit}>
-        <Field label="Client" required error={errors.client_id?.message}>
-          <Select {...register('client_id')} aria-invalid={errors.client_id ? 'true' : 'false'} autoFocus>
+      {err && <ErrorBox>{err}</ErrorBox>}
+      <form onSubmit={submit}>
+        <Field label="Client" required>
+          <Select
+            value={clientChoice}
+            onChange={(e) => setClientChoice(e.target.value)}
+            autoFocus
+          >
             <option value="">— select client —</option>
+            <option value={NEW_CLIENT_VALUE}>+ New Client</option>
+            {clients.length > 0 && <option disabled>──────────</option>}
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
-        <Row>
-          <Field label="Package">
-            <Select {...register('package_type')}>
-              <option value="">—</option>
-              <option value="boost">Boost</option>
-              <option value="launch">Launch</option>
-              <option value="both">Both</option>
-              <option value="undecided">Undecided</option>
-            </Select>
+
+        {isNewClient && (
+          <Field label="New client name" required>
+            <Input
+              value={newClientName}
+              onChange={(e) => setNewClientName(e.target.value)}
+              placeholder="e.g. Foundations Tree Experts"
+            />
           </Field>
-          <Field label="Estimated value" error={errors.estimated_value?.message}>
+        )}
+
+        <Field label="Packages">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-1 p-2.5 border border-edge rounded bg-surface">
+            {PACKAGE_SLUGS.map((slug) => (
+              <label key={slug} className="flex items-center gap-2 text-[13px] cursor-pointer hover:text-ink">
+                <input
+                  type="checkbox"
+                  checked={packages.has(slug)}
+                  onChange={() => togglePackage(slug)}
+                  className="accent-brand-mint"
+                />
+                <span>{PACKAGE_LABELS[slug]}</span>
+              </label>
+            ))}
+          </div>
+          {packages.size === 0 && (
+            <div className="text-[11px] text-ink-faint mt-1">
+              Pick what TKBS will deliver. These feed straight into proposal generation.
+            </div>
+          )}
+        </Field>
+
+        {packages.has('other') && (
+          <Field label={'What is "Other"?'} required>
+            <Input
+              value={otherLabel}
+              onChange={(e) => setOtherLabel(e.target.value)}
+              placeholder="e.g. Newsletter setup, podcast production"
+              maxLength={120}
+            />
+          </Field>
+        )}
+
+        <Field label="Estimated value">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted text-[13px] pointer-events-none">$</span>
             <Input
               type="number"
               min={0}
               step="any"
-              {...register('estimated_value')}
+              value={estimatedValue}
+              onChange={(e) => setEstimatedValue(e.target.value)}
               placeholder="0"
-              aria-invalid={errors.estimated_value ? 'true' : 'false'}
+              className="pl-6"
             />
-          </Field>
-        </Row>
+          </div>
+        </Field>
+
         <Row>
           <Field label="Source">
-            <Select {...register('source')}>
+            <Select value={source} onChange={(e) => setSource(e.target.value)}>
               <option value="">—</option>
-              <option value="referral">Referral</option>
-              <option value="cold">Cold</option>
-              <option value="web">Web</option>
-              <option value="content">Content</option>
-              <option value="paid_ads">Paid ads</option>
+              {SOURCE_SLUGS.map((slug) => (
+                <option key={slug} value={slug}>{SOURCE_LABELS[slug as SourceSlug]}</option>
+              ))}
             </Select>
           </Field>
           <Field label="Source detail">
-            <Input {...register('source_detail')} placeholder="e.g. LinkedIn intro from..." />
+            <Input
+              value={sourceDetail}
+              onChange={(e) => setSourceDetail(e.target.value)}
+              placeholder="Additional Details about How We Sourced This Client"
+            />
           </Field>
         </Row>
+
         <Field label="Notes">
-          <Textarea {...register('notes')} className="min-h-[80px]" />
+          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[80px]" />
         </Field>
+
         <div className="flex justify-end gap-2 mt-4">
-          <SecondaryButton type="button" onClick={onClose} disabled={isSubmitting}>Cancel</SecondaryButton>
-          <PrimaryButton type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Creating…' : 'Create engagement'}
+          <SecondaryButton type="button" onClick={onClose} disabled={submitting}>Cancel</SecondaryButton>
+          <PrimaryButton type="submit" disabled={submitting}>
+            {submitting ? 'Creating…' : 'Create engagement'}
           </PrimaryButton>
         </div>
       </form>

@@ -4,14 +4,16 @@
 // Each tab is a sub-component below. Profile changes save via PATCH; the
 // backend auto-tags every changed leaf as 'manual' in brand_profile_sources.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import BrandProfileEditor, { BrandProfile } from './BrandProfileEditor';
+import ContactsPanel from './ContactsPanel';
 import EnrichmentBadge from './EnrichmentBadge';
 import { toast } from '@/lib/toast';
 import { humanizeError } from '@/lib/humanize-error';
 import { cn } from '@/lib/cn';
+import { engagementTitle } from '@/lib/engagement-options';
 
 type Tab = 'overview' | 'brand' | 'calls' | 'engagements' | 'activity';
 
@@ -75,8 +77,8 @@ export default function ClientDetailView({
 // =========================================================================
 // Overview tab
 // =========================================================================
-function OverviewTab({ client, onChange }: { client: any; onChange: (c: any) => void }) {
-  const [form, setForm] = useState(() => ({
+function formFromClient(client: any) {
+  return {
     name: client.name || '',
     website: client.website || '',
     industry: client.industry || '',
@@ -84,14 +86,22 @@ function OverviewTab({ client, onChange }: { client: any; onChange: (c: any) => 
     type: client.type || '',
     employee_count: client.employee_count || '',
     revenue_estimate: client.revenue_estimate || '',
-    primary_contact_name: client.primary_contact_name || '',
-    email: client.email || '',
-    phone: client.phone || '',
-    role: client.role || '',
-    preferred_contact: client.preferred_contact || '',
     notes: client.notes || '',
-  }));
+  };
+}
+
+function OverviewTab({ client, onChange }: { client: any; onChange: (c: any) => void }) {
+  const [form, setForm] = useState(() => formFromClient(client));
   const [saving, setSaving] = useState(false);
+
+  // Resync the form when an external mutation lands on `client` — e.g.,
+  // Scrub website fills new fields server-side and the parent passes us a
+  // fresh client object. Keying on `updated_at` avoids resyncing on every
+  // parent re-render (which would clobber in-progress typing).
+  useEffect(() => {
+    setForm(formFromClient(client));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.updated_at]);
 
   const setF = (k: string) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -148,25 +158,9 @@ function OverviewTab({ client, onChange }: { client: any; onChange: (c: any) => 
           </Field>
         </Row>
         <Divider />
-        <Field label="Primary contact name">
-          <Input value={form.primary_contact_name} onChange={setF('primary_contact_name')} />
-        </Field>
-        <Row>
-          <Field label="Email"><Input type="email" value={form.email} onChange={setF('email')} /></Field>
-          <Field label="Phone"><Input value={form.phone} onChange={setF('phone')} /></Field>
-        </Row>
-        <Row>
-          <Field label="Role"><Input value={form.role} onChange={setF('role')} /></Field>
-          <Field label="Preferred contact">
-            <Select value={form.preferred_contact} onChange={setF('preferred_contact')}>
-              <option value="">—</option>
-              <option value="email">Email</option>
-              <option value="phone">Phone</option>
-              <option value="text">Text</option>
-              <option value="linkedin">LinkedIn</option>
-            </Select>
-          </Field>
-        </Row>
+        <PanelTitle>Contacts</PanelTitle>
+        <ContactsPanel clientId={client.id} />
+        <Divider />
         <Field label="Notes">
           <textarea
             value={form.notes}
@@ -189,7 +183,7 @@ function OverviewTab({ client, onChange }: { client: any; onChange: (c: any) => 
       <div className="flex flex-col gap-4">
         {client.source_lead_id && <SourcePanel client={client} />}
         <FitScorePanel client={client} fitBreakdown={fitBreakdown} onRecompute={recompute} />
-        <EnrichmentSidePanel client={client} />
+        <EnrichmentSidePanel client={client} onChange={onChange} />
       </div>
     </div>
   );
@@ -267,14 +261,44 @@ function FitScorePanel({ client, fitBreakdown, onRecompute }: { client: any; fit
   );
 }
 
-function EnrichmentSidePanel({ client }: { client: any }) {
+function EnrichmentSidePanel({ client, onChange }: { client: any; onChange: (c: any) => void }) {
   const enrichment = client.enrichment_data || {};
+  const [scrubbing, setScrubbing] = useState(false);
+  const hasWebsite = Boolean(client.website?.trim());
+
+  async function scrub() {
+    setScrubbing(true);
+    try {
+      const res = await api.post<{ client: any; summary: any }>(
+        `/api/clients/${client.id}/scrub-website`,
+      );
+      onChange(res.client);
+      const filled = res.summary?.fields_filled?.length ?? 0;
+      const brandFilled = res.summary?.brand_paths_filled?.length ?? 0;
+      const skipped = (res.summary?.fields_skipped?.length ?? 0) + (res.summary?.brand_paths_skipped?.length ?? 0);
+      const parts: string[] = [];
+      if (filled > 0) parts.push(`${filled} basic field${filled === 1 ? '' : 's'}`);
+      if (brandFilled > 0) parts.push(`${brandFilled} brand profile field${brandFilled === 1 ? '' : 's'}`);
+      const msg = parts.length > 0
+        ? `Filled ${parts.join(' and ')} from website${skipped > 0 ? ` (skipped ${skipped} already-set fields)` : ''}.`
+        : `Nothing to fill — all extracted values already had data${skipped > 0 ? ` (${skipped} skipped)` : ''}.`;
+      toast.success(msg);
+    } catch (err: unknown) {
+      toast.error(humanizeError(err, 'Failed to scrub website.'));
+    } finally {
+      setScrubbing(false);
+    }
+  }
+
   return (
     <div className={panelClass}>
       <PanelTitle>Enrichment</PanelTitle>
       <EnrichmentBadge status={client.enrichment_status} />
       {client.enrichment_status === 'succeeded' && (
         <div className="mt-2.5 text-xs text-ink-muted leading-relaxed">
+          {enrichment.extracted_emails?.length > 0 && (
+            <div><strong>Emails:</strong> {enrichment.extracted_emails.join(', ')}</div>
+          )}
           {enrichment.emails?.length > 0 && (
             <div><strong>Emails:</strong> {enrichment.emails.join(', ')}</div>
           )}
@@ -289,6 +313,14 @@ function EnrichmentSidePanel({ client }: { client: any }) {
           )}
         </div>
       )}
+      <button
+        onClick={scrub}
+        disabled={!hasWebsite || scrubbing}
+        title={hasWebsite ? 'Fetch the website and auto-fill blank fields' : 'Add a website URL first'}
+        className="mt-2.5 px-3 py-1.5 bg-surface text-ink border border-edge rounded text-xs font-semibold hover:bg-surface-alt disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {scrubbing ? 'Scrubbing…' : 'Scrub website'}
+      </button>
     </div>
   );
 }
@@ -395,7 +427,7 @@ function EngagementsTab({ engagements, clientId }: { engagements: any[]; clientI
           {engagements.map((e) => (
             <li key={e.id} className={cn(panelClass, 'mb-2 p-3')}>
               <Link href={`/engagements/${e.id}`} className="font-semibold text-ink hover:text-brand-mint">
-                {e.package_type || 'Engagement'} #{e.id}
+                {engagementTitle(e) || 'Engagement'} #{e.id}
               </Link>
               <EngagementStatusPill status={e.status} />
               <span className="text-xs text-ink-muted ml-2">

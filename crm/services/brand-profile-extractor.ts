@@ -65,20 +65,36 @@ export const BRAND_PROFILE_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `You are extracting a Brand Profile from a sales call transcript for TKBS, a marketing agency. The Brand Profile will be used to generate marketing materials for the prospect.
-
-Your task:
+const TRANSCRIPT_TASK = `Your task:
 1. Read the transcript carefully.
 2. Extract ONLY information that the prospect (or speakers on their behalf) actually stated or strongly implied.
 3. For any field not discussed or not inferable, leave it null (scalars) or [] (arrays). DO NOT invent, guess, or fill placeholder values.
-4. Output valid JSON matching the exact schema below.
+4. Output valid JSON matching the exact schema below.`;
+
+const WEBSITE_TASK = `Your task:
+1. Read the website content carefully (this is page text + structured fragments extracted from the homepage and any /about or /contact pages of the prospect's website).
+2. Extract ONLY information that the website actually states or strongly implies. Marketing copy is fair game; promotional puffery is not (e.g., "industry-leading" is not a brand_personality trait).
+3. For any field the website doesn't substantiate, leave it null (scalars) or [] (arrays). DO NOT invent, guess, or fill placeholder values.
+4. source_quote, when used, must be a verbatim substring of the supplied website content.
+5. Output valid JSON matching the exact schema below.`;
+
+const buildSystemPrompt = (source: 'transcript' | 'website') => `You are extracting a Brand Profile from a ${source === 'transcript' ? 'sales call transcript' : "prospect's website content"} for TKBS, a marketing agency. The Brand Profile will be used to generate marketing materials for the prospect.
+
+${source === 'transcript' ? TRANSCRIPT_TASK : WEBSITE_TASK}
 
 ## Output format
 
-Return a single JSON object with two top-level keys:
+Return a single JSON object with three top-level keys:
 
 1. \`profile\` — the extracted Brand Profile in the shape below.
-2. \`sidecar\` — a parallel object with the same field paths, where each leaf value is either \`null\` (if field wasn't extracted) OR an object \`{ "confidence": 0.0-1.0, "source_quote": "verbatim quote from transcript" }\`.
+2. \`sidecar\` — a parallel object with the same field paths, where each leaf value is either \`null\` (if field wasn't extracted) OR an object \`{ "confidence": 0.0-1.0, "source_quote": "verbatim quote from source" }\`.
+3. \`basic_fields\` — basic CRM-level facts that aren't part of the Brand Profile schema:
+   - \`type\`: one of "B2B", "B2C", or null. B2C if the customer-facing site sells to consumers; B2B if it sells to businesses.
+   - \`employee_count\`: a string range like "1-5", "10-25", "50-100", or null. Use a range, not an exact number, unless explicitly stated.
+   - \`revenue_estimate\`: a string like "$500K", "$2M", or null. Only include if the website states/implies revenue, otherwise null.
+   - \`location_city\`, \`location_state\`: strings extracted from any address shown on the site, or null.
+   - \`primary_contact_name\`, \`primary_contact_role\`: extracted from the homepage / about / team / contact pages if a single primary contact is identifiable; otherwise null.
+   - \`primary_email\`, \`primary_phone\`: a single best contact channel from the site, or null.
 
 ## Brand Profile schema
 
@@ -100,8 +116,8 @@ ${JSON.stringify(BRAND_PROFILE_SCHEMA, null, 2)}
 
 ## Confidence rubric
 
-- 0.9-1.0: prospect stated this explicitly and unambiguously
-- 0.7-0.9: prospect strongly implied this with specific context
+- 0.9-1.0: stated explicitly and unambiguously
+- 0.7-0.9: strongly implied with specific context
 - 0.5-0.7: plausible inference from multiple hints
 - 0.3-0.5: weak signal, worth flagging for review
 - Below 0.3: don't extract (leave null)
@@ -109,8 +125,8 @@ ${JSON.stringify(BRAND_PROFILE_SCHEMA, null, 2)}
 ## Critical rules
 
 - Output ONLY the JSON object. No markdown code fences, no prose, no explanation.
-- source_quote must be a VERBATIM substring of the transcript, not a paraphrase.
-- If the transcript is empty or clearly unrelated to a business discussion, return profile with all nulls/empty arrays.`;
+- source_quote must be a VERBATIM substring of the source content, not a paraphrase.
+- If the source is empty or clearly unrelated to a business, return profile with all nulls/empty arrays and basic_fields with all nulls.`;
 
 const MODEL = 'claude-opus-4-6';
 const MAX_TOKENS = 4096;
@@ -118,9 +134,12 @@ const MAX_TOKENS = 4096;
 export interface ExtractionResult {
   profile: Record<string, unknown>;
   sidecar: Record<string, unknown>;
+  basic_fields?: Record<string, unknown>;
   usage: unknown;
   model: string;
 }
+
+export type ExtractionSource = 'transcript' | 'website';
 
 export class NoApiKeyError extends Error {
   code = 'NO_API_KEY';
@@ -133,18 +152,19 @@ function getClient() {
 }
 
 export async function extractBrandProfile(
-  transcript: string,
-  options: { model?: string } = {},
+  content: string,
+  options: { model?: string; source?: ExtractionSource } = {},
 ): Promise<ExtractionResult> {
-  if (!transcript || !transcript.trim()) {
-    throw new Error('Transcript is empty');
+  if (!content || !content.trim()) {
+    throw new Error('Content is empty');
   }
-  if (transcript.length < 50) {
-    throw new Error('Transcript too short to extract meaningful data (minimum 50 chars)');
+  if (content.length < 50) {
+    throw new Error('Content too short to extract meaningful data (minimum 50 chars)');
   }
 
   const client = getClient();
   const model = options.model || MODEL;
+  const source: ExtractionSource = options.source || 'transcript';
 
   const response = await client.messages.create({
     model,
@@ -152,12 +172,15 @@ export async function extractBrandProfile(
     system: [
       {
         type: 'text',
-        text: SYSTEM_PROMPT,
+        text: buildSystemPrompt(source),
         cache_control: { type: 'ephemeral' },
       },
     ],
     messages: [
-      { role: 'user', content: `Transcript:\n\n${transcript}\n\nReturn the JSON now.` },
+      {
+        role: 'user',
+        content: `${source === 'transcript' ? 'Transcript' : 'Website content'}:\n\n${content}\n\nReturn the JSON now.`,
+      },
     ],
   });
 
@@ -172,7 +195,11 @@ export async function extractBrandProfile(
     .replace(/\n?```\s*$/, '')
     .trim();
 
-  let parsed: { profile?: Record<string, unknown>; sidecar?: Record<string, unknown> };
+  let parsed: {
+    profile?: Record<string, unknown>;
+    sidecar?: Record<string, unknown>;
+    basic_fields?: Record<string, unknown>;
+  };
   try {
     parsed = JSON.parse(cleaned);
   } catch {
@@ -185,6 +212,7 @@ export async function extractBrandProfile(
   return {
     profile: parsed.profile,
     sidecar: parsed.sidecar || {},
+    basic_fields: parsed.basic_fields,
     usage: response.usage,
     model: response.model,
   };

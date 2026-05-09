@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
 import { audit } from '@/lib/audit';
+import { EngagementPatchSchema } from '@/lib/schemas';
+import { summarizePackagePricing, type EngagementPackage } from '@/lib/engagement-options';
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const result = await requireAuth();
@@ -46,13 +48,81 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ error: 'lost_reason is required when closing as lost' }, { status: 400 });
   }
 
+  // Validate the structured fields that have schema rules ('other' requires
+  // a label, contract_months has bounds, title is trimmed/length-capped).
+  // Other fields are passed through.
+  if (
+    body.packages !== undefined ||
+    body.contract_months !== undefined ||
+    body.title !== undefined ||
+    body.contact_id !== undefined
+  ) {
+    const parsed = EngagementPatchSchema.safeParse({
+      title: body.title,
+      packages: body.packages,
+      contract_months: body.contract_months,
+      contact_id: body.contact_id,
+    });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.errors[0]?.message || 'Invalid payload' },
+        { status: 400 },
+      );
+    }
+    if (parsed.data.title !== undefined) body.title = parsed.data.title;
+    if (parsed.data.packages !== undefined) body.packages = parsed.data.packages;
+    if (parsed.data.contract_months !== undefined) body.contract_months = parsed.data.contract_months;
+    if (parsed.data.contact_id !== undefined) body.contact_id = parsed.data.contact_id;
+  }
+
+  // If a contact_id is being set, make sure it actually belongs to the
+  // engagement's client — otherwise users could attach an unrelated
+  // contact via a hand-crafted PATCH.
+  if (body.contact_id != null) {
+    const { data: contact } = await supabase
+      .from('client_contacts')
+      .select('id')
+      .eq('id', body.contact_id)
+      .eq('client_id', existing.client_id)
+      .maybeSingle();
+    if (!contact) {
+      return NextResponse.json(
+        { error: 'Contact does not belong to this engagement\'s client' },
+        { status: 400 },
+      );
+    }
+  }
+
   const allowed = [
-    'client_id', 'status', 'package_type', 'source', 'source_detail',
-    'estimated_value', 'closed_value', 'lost_reason', 'notes', 'owner_id',
+    'client_id', 'status', 'title', 'packages', 'source', 'source_detail',
+    'estimated_value', 'closed_value', 'monthly_recurring_value',
+    'closed_monthly_value', 'contract_months', 'contact_id',
+    'lost_reason', 'notes', 'owner_id',
   ];
   const updates: Record<string, unknown> = {};
   for (const f of allowed) {
     if (body[f] !== undefined) updates[f] = body[f];
+  }
+
+  // Whenever packages change, recompute the cached aggregate columns so
+  // reports queries don't need to walk the JSONB array. estimated_value
+  // is overwritten only when the package list has any priced rows — if
+  // no prices are set yet, leave whatever scalar the user typed alone.
+  if (Array.isArray(body.packages)) {
+    const packages = body.packages as EngagementPackage[];
+    const { one_time_total, monthly_total } = summarizePackagePricing(packages);
+    const anyPriced = packages.some((p) => Number(p.unit_price ?? 0) > 0);
+    if (anyPriced) {
+      updates.estimated_value = one_time_total;
+    }
+    updates.monthly_recurring_value = monthly_total;
+
+    // If we're closing as won AND the package list has MRR, lock in the
+    // closed_monthly_value at close time the same way closed_value is
+    // typically locked in.
+    if (body.status === 'won' && monthly_total > 0 && body.closed_monthly_value === undefined) {
+      updates.closed_monthly_value = monthly_total;
+    }
   }
   if (isStatusChange) {
     updates.status_changed_at = new Date().toISOString();

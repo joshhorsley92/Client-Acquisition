@@ -12,6 +12,7 @@ import {
   Phone,
   Briefcase,
   BarChart3,
+  Compass,
   Settings as SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ import { cn } from '@/lib/cn';
 const NAV_ITEMS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
   { href: '/',            label: 'Home',        Icon: Home },
   { href: '/clients',     label: 'Clients',     Icon: Building2 },
+  { href: '/discovery',   label: 'Discovery',   Icon: Compass },
   { href: '/calls',       label: 'Calls',       Icon: Phone },
   { href: '/engagements', label: 'Engagements', Icon: Briefcase },
   { href: '/reports',     label: 'Reports',     Icon: BarChart3 },

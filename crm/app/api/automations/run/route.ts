@@ -64,6 +64,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve the engagement's contact: the explicit contact_id override
+  // wins, falling back to the client's primary contact. The legacy cache
+  // on clients is only used when contacts haven't been migrated/seeded.
+  let resolvedContact: { name: string | null; email: string | null; phone: string | null; role: string | null } | null = null;
+  if (engagement?.contact_id) {
+    const { data: c } = await supabase
+      .from('client_contacts')
+      .select('name, email, phone, role')
+      .eq('id', engagement.contact_id)
+      .maybeSingle();
+    if (c) resolvedContact = c;
+  }
+  if (!resolvedContact) {
+    const { data: primary } = await supabase
+      .from('client_contacts')
+      .select('name, email, phone, role')
+      .eq('client_id', body.client_id)
+      .eq('is_primary', true)
+      .maybeSingle();
+    if (primary) resolvedContact = primary;
+  }
+
   // Create the job row synchronously so the client has an id to poll.
   const { data: job, error: jobErr } = await supabase
     .from('generation_jobs')
@@ -76,7 +98,7 @@ export async function POST(req: NextRequest) {
     .single();
   if (jobErr) return NextResponse.json({ error: jobErr.message }, { status: 500 });
 
-  const prompt = buildPrompt(meta.promptType, engagement, client, brandProfile);
+  const prompt = buildPrompt(meta.promptType, engagement, client, brandProfile, resolvedContact);
 
   // Fire-and-forget — use service role for the writeback since there's no
   // user session attached to the async Promise.

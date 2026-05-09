@@ -21,20 +21,36 @@ export default async function ReportsPage() {
     { data: clientRevenueRows },
   ] = await Promise.all([
     supabase.from('clients').select('*', { count: 'exact', head: true }),
-    supabase.from('engagements').select('estimated_value', { count: 'exact' }).in('status', ['new', 'working']),
-    supabase.from('engagements').select('estimated_value, closed_value, opened_at, closed_at', { count: 'exact' }).eq('status', 'won'),
+    supabase.from('engagements').select('estimated_value, monthly_recurring_value', { count: 'exact' }).in('status', ['new', 'working']),
+    supabase.from('engagements').select('estimated_value, closed_value, monthly_recurring_value, closed_monthly_value, contract_months, opened_at, closed_at', { count: 'exact' }).eq('status', 'won'),
     supabase.from('engagements').select('*', { count: 'exact', head: true }).eq('status', 'lost'),
     supabase.from('engagements').select('status'),
     supabase.from('engagements').select('source').not('source', 'is', null),
     supabase.from('engagements').select('lost_reason').eq('status', 'lost').not('lost_reason', 'is', null),
-    supabase.from('engagements').select('closed_at, closed_value, estimated_value').eq('status', 'won').not('closed_at', 'is', null),
+    supabase.from('engagements').select('closed_at, closed_value, estimated_value, closed_monthly_value, monthly_recurring_value, contract_months').eq('status', 'won').not('closed_at', 'is', null),
     supabase.from('clients_with_rollups').select('id, name, lifetime_revenue, won_engagements, open_engagements').order('lifetime_revenue', { ascending: false }).limit(20),
   ]);
 
   const pipelineValue = (openRows || []).reduce((s: number, r: any) => s + (Number(r.estimated_value) || 0), 0);
-  const lifetimeRevenue = (wonRows || []).reduce(
-    (s: number, r: any) => s + (Number(r.closed_value) || Number(r.estimated_value) || 0), 0,
-  );
+  const mrrPipeline = (openRows || []).reduce((s: number, r: any) => s + (Number(r.monthly_recurring_value) || 0), 0);
+
+  // Lifetime revenue = won one-time + realized MRR (capped by contract).
+  const now = Date.now();
+  const MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30.4375;
+  let lifetimeRevenue = 0;
+  let activeMrr = 0;
+  for (const r of wonRows || []) {
+    lifetimeRevenue += Number((r as any).closed_value) || Number((r as any).estimated_value) || 0;
+    const mrr = Number((r as any).closed_monthly_value) || Number((r as any).monthly_recurring_value) || 0;
+    if (mrr <= 0) continue;
+    const startMs = (r as any).closed_at ? new Date((r as any).closed_at).getTime() : null;
+    const elapsedMonths = startMs ? Math.max(0, (now - startMs) / MS_PER_MONTH) : 0;
+    const cap = (r as any).contract_months ? Number((r as any).contract_months) : null;
+    const months = cap ? Math.min(elapsedMonths, cap) : elapsedMonths;
+    lifetimeRevenue += mrr * months;
+    if (!cap || elapsedMonths < cap) activeMrr += mrr;
+  }
+
   const totalClosed = (wonCount || 0) + (lostCount || 0);
   const winRate = totalClosed > 0 ? Math.round(((wonCount || 0) / totalClosed) * 100) : 0;
   const cycles = (wonRows || [])
@@ -45,7 +61,7 @@ export default async function ReportsPage() {
   const statusTally = tally(statusRows, (r: any) => r.status);
   const sourceTally = tally(sourceRows, (r: any) => r.source);
   const lostReasonTally = tally(lostReasonRows, (r: any) => r.lost_reason);
-  const monthly = bucketMonthly(monthlyRows || []);
+  const monthly = bucketMonthly(monthlyRows || [], now);
 
   return (
     <div>
@@ -54,10 +70,28 @@ export default async function ReportsPage() {
       <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <KpiTile label="Clients" value={String(clientCount || 0)} />
         <KpiTile label="Open engagements" value={String(openEng || 0)} />
-        <KpiTile label="Pipeline value" value={fmtMoney(pipelineValue)} />
+        <KpiTile label="One-time pipeline" value={fmtMoney(pipelineValue)} />
+        <KpiTile label="MRR pipeline" value={mrrPipeline > 0 ? `${fmtMoney(mrrPipeline)}/mo` : '—'} />
         <KpiTile label="Lifetime revenue" value={fmtMoney(lifetimeRevenue)} />
         <KpiTile label="Win rate" value={`${winRate}%`} />
         <KpiTile label="Avg cycle" value={avgCycle != null ? `${avgCycle}d` : '—'} />
+      </div>
+
+      <div className="bg-surface rounded-lg p-4 border border-edge mb-4">
+        <h2 className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mt-0 mb-3">
+          Recurring revenue
+        </h2>
+        {activeMrr === 0 && mrrPipeline === 0 ? (
+          <div className="text-xs text-ink-faint">
+            No recurring deals yet. Set <strong>Monthly</strong> on any package and close the engagement to start tracking MRR here.
+          </div>
+        ) : (
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+            <KpiTile label="Active MRR" value={`${fmtMoney(activeMrr)}/mo`} />
+            <KpiTile label="Annualized (ARR)" value={fmtMoney(activeMrr * 12)} />
+            <KpiTile label="MRR pipeline" value={mrrPipeline > 0 ? `${fmtMoney(mrrPipeline)}/mo` : '—'} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -81,12 +115,15 @@ export default async function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-        <ReportPanel title="Monthly closed-won revenue (last 12)">
+        <ReportPanel title="Monthly revenue (last 12 — one-time + MRR)">
           {monthly.length === 0 ? (
             <div className="text-xs text-ink-faint">No closed deals yet.</div>
           ) : (
-            <SimpleTable rows={monthly.map(({ month, revenue, count }) => ({
-              label: month, value: `${count} · ${fmtMoney(revenue)}`,
+            <SimpleTable rows={monthly.map(({ month, revenue, recurring, count }) => ({
+              label: month,
+              value: recurring > 0
+                ? `${count} · ${fmtMoney(revenue)} (${fmtMoney(recurring)} MRR)`
+                : `${count} · ${fmtMoney(revenue)}`,
             }))} />
           )}
         </ReportPanel>
@@ -135,14 +172,45 @@ function tally(rows: any[] | null, key: (r: any) => string | undefined): Array<[
   }
   return [...m.entries()].sort((a, b) => b[1] - a[1]);
 }
-function bucketMonthly(rows: any[]) {
-  const m = new Map<string, { revenue: number; count: number }>();
+function bucketMonthly(rows: any[], nowMs: number) {
+  // Same logic as /api/reports/monthly: one-time portion lands in the close
+  // month; MRR distributes month-by-month from close forward, capped by
+  // contract_months when set, capped at the current month otherwise.
+  type Bucket = { revenue: number; recurring: number; count: number };
+  const m = new Map<string, Bucket>();
+  const ensure = (key: string) => {
+    let cur = m.get(key);
+    if (!cur) { cur = { revenue: 0, recurring: 0, count: 0 }; m.set(key, cur); }
+    return cur;
+  };
+  const monthKey = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+
+  const now = new Date(nowMs);
   for (const r of rows) {
-    const month = String(r.closed_at).slice(0, 7);
-    const value = Number(r.closed_value) || Number(r.estimated_value) || 0;
-    const cur = m.get(month) || { revenue: 0, count: 0 };
-    cur.revenue += value; cur.count += 1;
-    m.set(month, cur);
+    if (!r.closed_at) continue;
+    const close = new Date(r.closed_at);
+    const oneTime = Number(r.closed_value) || Number(r.estimated_value) || 0;
+    const mrr = Number(r.closed_monthly_value) || Number(r.monthly_recurring_value) || 0;
+
+    const closeKey = monthKey(close);
+    const closeBucket = ensure(closeKey);
+    closeBucket.revenue += oneTime;
+    closeBucket.count += 1;
+
+    if (mrr > 0) {
+      const cap = r.contract_months ? Number(r.contract_months) : null;
+      const cursor = new Date(Date.UTC(close.getUTCFullYear(), close.getUTCMonth(), 1));
+      let counted = 0;
+      while (cursor <= now) {
+        if (cap !== null && counted >= cap) break;
+        const b = ensure(monthKey(cursor));
+        b.revenue += mrr;
+        b.recurring += mrr;
+        counted += 1;
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      }
+    }
   }
   return [...m.entries()].map(([month, v]) => ({ month, ...v }))
     .sort((a, b) => b.month.localeCompare(a.month)).slice(0, 12);

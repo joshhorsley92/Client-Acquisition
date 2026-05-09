@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { requireAuth, isAuthError } from '@/lib/api-auth';
 import { audit } from '@/lib/audit';
 import { EngagementCreateSchema } from '@/lib/schemas';
+import { summarizePackagePricing, type EngagementPackage } from '@/lib/engagement-options';
 
 export async function GET(req: NextRequest) {
   const result = await requireAuth();
@@ -55,15 +56,45 @@ export async function POST(req: NextRequest) {
   const { data: client } = await supabase.from('clients').select('id').eq('id', body.client_id).single();
   if (!client) return NextResponse.json({ error: 'client_id does not match a client' }, { status: 400 });
 
+  // If a specific contact is requested, verify it belongs to this client.
+  if (body.contact_id != null) {
+    const { data: contact } = await supabase
+      .from('client_contacts')
+      .select('id')
+      .eq('id', body.contact_id)
+      .eq('client_id', body.client_id)
+      .maybeSingle();
+    if (!contact) {
+      return NextResponse.json(
+        { error: 'Contact does not belong to the chosen client' },
+        { status: 400 },
+      );
+    }
+  }
+
+  // Roll the package list into the cached aggregate columns. Manually-
+  // submitted estimated_value (e.g., from the create modal) wins over the
+  // package-derived total only when no packages have prices set — it's a
+  // reasonable user override for the early-entry case.
+  const packagesIn = (body.packages ?? []) as EngagementPackage[];
+  const { one_time_total, monthly_total } = summarizePackagePricing(packagesIn);
+  const estimatedValue = one_time_total > 0
+    ? one_time_total
+    : (body.estimated_value ?? 0);
+
   const { data, error } = await supabase
     .from('engagements')
     .insert({
       client_id: body.client_id,
       status: body.status || 'new',
-      package_type: body.package_type ?? null,
+      title: body.title ?? null,
+      packages: packagesIn,
       source: body.source ?? null,
       source_detail: body.source_detail ?? null,
-      estimated_value: body.estimated_value ?? 0,
+      estimated_value: estimatedValue,
+      monthly_recurring_value: monthly_total,
+      contract_months: body.contract_months ?? null,
+      contact_id: body.contact_id ?? null,
       notes: body.notes ?? null,
       owner_id: body.owner_id ?? auth.userId,
     })

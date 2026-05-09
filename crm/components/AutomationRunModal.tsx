@@ -21,6 +21,7 @@ import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { humanizeError } from '@/lib/humanize-error';
 import { cn } from '@/lib/cn';
+import { engagementTitle, type EngagementPackage } from '@/lib/engagement-options';
 
 interface AutomationDef {
   key: string;
@@ -43,7 +44,13 @@ export default function AutomationRunModal({
 }: {
   open: boolean;
   onClose: () => void;
-  engagement: { id: number; client_id: number; client_name?: string; package_type?: string | null };
+  engagement: {
+    id: number;
+    client_id: number;
+    client_name?: string;
+    title?: string | null;
+    packages?: Array<EngagementPackage | string>;
+  };
   onCompleted?: (jobId: number) => void;
 }) {
   const [catalog, setCatalog] = useState<AutomationDef[]>([]);
@@ -122,7 +129,7 @@ export default function AutomationRunModal({
     }
   }
 
-  const engagementLabel = `${engagement.package_type || 'Engagement'} #${engagement.id}`;
+  const engagementLabel = `${engagementTitle(engagement) || 'Engagement'} #${engagement.id}`;
 
   return (
     <Modal
